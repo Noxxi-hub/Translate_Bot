@@ -417,7 +417,7 @@ async def on_message(message: discord.Message):
     if (
         any(a.filename.lower().endswith(".gif") or (a.content_type and "gif" in a.content_type.lower())
             for a in message.attachments)
-        or _SKIP_URL_PATTERN.search(message.content)
+        or re.search(r'https?://\S*(?:tenor\.com|giphy\.com|youtube\.com|youtu\.be|youtube-nocookie\.com|yt\.be)\S*', message.content, re.IGNORECASE)
         or message.stickers
     ):
         return
