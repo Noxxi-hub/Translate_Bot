@@ -34,6 +34,7 @@ LOGO_URL = (
 )
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
+BOT_LOG_CHANNEL_ID = 1484252260614537247
 
 # Feste Zielsprachen dieses Bots (PT + EN immer aktiv)
 # Weitere können per !tsprachen zugeschaltet werden
@@ -347,6 +348,18 @@ async def on_ready():
 
     log.info(f"→ {bot.user}  •  ÜBERSETZER-BOT ONLINE  •  {discord.utils.utcnow():%Y-%m-%d %H:%M UTC}")
     log.info(f"Aktive Sprachen: {get_active_languages()}")
+
+    if BOT_LOG_CHANNEL_ID:
+        channel = bot.get_channel(BOT_LOG_CHANNEL_ID)
+        if channel:
+            if errors:
+                msg = "⚠️ **Übersetzer-Bot gestartet mit Fehlern:**\n" + "\n".join(errors)
+            else:
+                msg = (
+                    "✅ **Übersetzer-Bot erfolgreich gestartet!**\n"
+                    "🔧 tsprachen.py • geladen"
+                )
+            await channel.send(msg)
 
 
 # ────────────────────────────────────────────────
