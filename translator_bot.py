@@ -340,10 +340,13 @@ async def on_ready():
     if bot_ready:
         return
     bot_ready = True
+    errors = []
+
     try:
         await bot.load_extension("tsprachen")
         log.info("✅ tsprachen geladen")
     except Exception as e:
+        errors.append(f"❌ tsprachen: {e}")
         log.error(f"❌ tsprachen: {e}")
 
     log.info(f"→ {bot.user}  •  ÜBERSETZER-BOT ONLINE  •  {discord.utils.utcnow():%Y-%m-%d %H:%M UTC}")
