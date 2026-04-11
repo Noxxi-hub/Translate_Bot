@@ -253,10 +253,20 @@ class RaumSprachenView(discord.ui.View):
 
     def _get_current(self) -> set:
         """Aktuelle Raumeinstellungen oder globale als Basis."""
-        room = get_room_langs(self.channel_id)
-        if room is None:
+        try:
+            from pymongo import MongoClient
+            import os
+            client = MongoClient(os.getenv("MONGODB_URI"))
+            col = client["vhabot"]["tsprachen_rooms"]
+            doc = col.find_one({"_id": str(self.channel_id)})
+            if not doc:
+                return get_active_langs().copy()  # kein Eintrag → globale
+            if doc.get("disabled"):
+                return set()  # explizit deaktiviert
+            langs = set(doc.get("langs", []))
+            return langs if langs else get_active_langs().copy()
+        except Exception:
             return get_active_langs().copy()
-        return room.copy()
 
     def _update_buttons(self):
         self.clear_items()
