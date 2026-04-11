@@ -244,33 +244,23 @@ class GlobalSprachenView(discord.ui.View):
 # ────────────────────────────────────────────────
 
 class RaumSprachenView(discord.ui.View):
-    def __init__(self, author: discord.Member, channel_id: int, channel_name: str):
+    def __init__(self, author: discord.Member, channel_id: int, channel_name: str, current: set):
         super().__init__(timeout=120)
         self.author = author
         self.channel_id = channel_id
         self.channel_name = channel_name
+        self.current = current  # State im Memory — kein DB-Call beim Button-Klick
         self._update_buttons()
-
-    def _get_current(self) -> set:
-        """Aktuelle Raumeinstellungen — None bedeutet globale Einstellungen."""
-        room = get_room_langs(self.channel_id)
-        if room is None:
-            return get_active_langs().copy()
-        return room.copy()
 
     def _update_buttons(self):
         self.clear_items()
-        current = self._get_current()
-
-        # Alle wählbaren Sprachen für Raumsprachen — PT+EN auch abschaltbar!
         all_langs = {
             "PT": {"flag": "🇧🇷", "name": "Português"},
             "EN": {"flag": "🇬🇧", "name": "English"},
             **OPTIONAL_LANGS
         }
-
         for code, info in all_langs.items():
-            is_active = code in current
+            is_active = code in self.current
             btn = discord.ui.Button(
                 label=f"{info['flag']} {info['name']}",
                 style=discord.ButtonStyle.success if is_active else discord.ButtonStyle.secondary,
@@ -280,7 +270,6 @@ class RaumSprachenView(discord.ui.View):
             btn.callback = self._make_callback(code)
             self.add_item(btn)
 
-        # Sonder-Buttons in letzter Reihe
         reset_btn = discord.ui.Button(
             label="📡 Globale Einstellungen",
             style=discord.ButtonStyle.primary,
@@ -308,19 +297,17 @@ class RaumSprachenView(discord.ui.View):
                 )
                 return
 
-            # Direkt aus DB lesen um Race Conditions zu vermeiden
-            room = get_room_langs(self.channel_id)
-            current = room.copy() if room is not None else get_active_langs().copy()
-
-            if code in current:
-                current.discard(code)
+            # State im Memory updaten — kein DB-Call nötig
+            if code in self.current:
+                self.current.discard(code)
                 action = "deaktiviert"
             else:
-                current.add(code)
+                self.current.add(code)
                 action = "aktiviert"
 
-            # Immer als explizite Raumeinstellung speichern (nicht disabled)
-            set_room_langs(self.channel_id, current, disabled=False)
+            # In DB speichern
+            set_room_langs(self.channel_id, self.current.copy(), disabled=False)
+
             self._update_buttons()
             embed = self._make_embed()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -331,7 +318,6 @@ class RaumSprachenView(discord.ui.View):
                 f"{info['flag']} **{info['name']}** in #{self.channel_name} {action}!",
                 ephemeral=True
             )
-
         return callback
 
     async def _reset_callback(self, interaction: discord.Interaction):
@@ -341,7 +327,9 @@ class RaumSprachenView(discord.ui.View):
                 ephemeral=True
             )
             return
+        # DB-Eintrag löschen → globale Einstellungen
         set_room_langs(self.channel_id, None)
+        self.current = get_active_langs().copy()
         self._update_buttons()
         embed = self._make_embed()
         await interaction.response.edit_message(embed=embed, view=self)
@@ -358,29 +346,21 @@ class RaumSprachenView(discord.ui.View):
             )
             return
         set_room_langs(self.channel_id, set(), disabled=True)
+        self.current = set()
         self._update_buttons()
-        try:
-            embed = self._make_embed()
-            await interaction.response.edit_message(embed=embed, view=self)
-            await interaction.followup.send(
-                f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
-                ephemeral=True
-            )
-        except Exception as e:
-            log.error(f"off_callback Fehler: {e}")
-            await interaction.response.send_message(
-                f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
-                ephemeral=True
-            )
+        embed = self._make_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(
+            f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
+            ephemeral=True
+        )
 
     def _make_embed(self) -> discord.Embed:
         room_setting = get_room_langs(self.channel_id)
-        current = self._get_current()
-
         if room_setting is None:
             status_text = "📡 Nutzt globale Einstellungen"
             color = 0x3498DB
-        elif len(room_setting) == 0:
+        elif len(self.current) == 0:
             status_text = "🚫 Übersetzung deaktiviert"
             color = 0xED4245
         else:
@@ -399,10 +379,9 @@ class RaumSprachenView(discord.ui.View):
             "EN": {"flag": "🇬🇧", "name": "English"},
             **OPTIONAL_LANGS
         }
-
         status_lines = []
         for code, info in all_langs.items():
-            status = "✅ Aktiv" if code in current else "❌ Inaktiv"
+            status = "✅ Aktiv" if code in self.current else "❌ Inaktiv"
             status_lines.append(f"{info['flag']} {info['name']}: **{status}**")
 
         embed.add_field(
@@ -410,12 +389,12 @@ class RaumSprachenView(discord.ui.View):
             value="\n".join(status_lines),
             inline=False
         )
-
         embed.set_footer(
             text="📡 Globale Einstellungen = Reset • 🚫 Alle aus = Übersetzung deaktivieren",
             icon_url=LOGO_URL
         )
         return embed
+
 
 
 # ────────────────────────────────────────────────
@@ -432,28 +411,20 @@ class TSprachenCog(commands.Cog):
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
-
-        # Alte Nachrichten löschen
         try:
             async for msg in ctx.channel.history(limit=20):
                 if msg.author == ctx.guild.me and msg.embeds:
-                    title = msg.embeds[0].title or ""
-                    if "Übersetzer-Bot • Globale Sprachen" in title:
+                    if "Übersetzer-Bot • Globale Sprachen" in (msg.embeds[0].title or ""):
                         await msg.delete()
         except Exception:
             pass
-
         view = GlobalSprachenView(ctx.author)
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
     @commands.command(name="raumsprachen")
     async def cmd_raumsprachen(self, ctx, channel_id: int = None):
-        """
-        Raumsprachen per Button verwalten.
-        !traumsprachen          → aktuellen Kanal einstellen
-        !traumsprachen [ID]     → bestimmten Kanal einstellen
-        """
+        """Raumsprachen per Button verwalten."""
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
@@ -462,23 +433,33 @@ class TSprachenCog(commands.Cog):
         ch = ctx.guild.get_channel(cid)
         ch_name = ch.name if ch else str(cid)
 
-        # Alte Nachrichten löschen
         try:
             async for msg in ctx.channel.history(limit=20):
                 if msg.author == ctx.guild.me and msg.embeds:
-                    title = msg.embeds[0].title or ""
-                    if f"Raumsprachen • #{ch_name}" in title:
+                    if f"Raumsprachen • #{ch_name}" in (msg.embeds[0].title or ""):
                         await msg.delete()
         except Exception:
             pass
 
-        view = RaumSprachenView(ctx.author, cid, ch_name)
+        # State einmal beim Öffnen laden
+        try:
+            col = get_room_col()
+            doc = col.find_one({"_id": str(cid)})
+            if not doc or doc.get("disabled"):
+                current = get_active_langs().copy()
+            else:
+                langs = set(doc.get("langs", []))
+                current = langs if langs else get_active_langs().copy()
+        except Exception:
+            current = get_active_langs().copy()
+
+        view = RaumSprachenView(ctx.author, cid, ch_name, current)
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
     @commands.command(name="kanalid", aliases=["channelid"])
     async def cmd_kanalid(self, ctx):
-        """Alle Textkanäle mit ID als DM — für !traumsprachen [ID]."""
+        """Alle Textkanäle mit ID als DM."""
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
