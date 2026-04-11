@@ -252,28 +252,17 @@ class RaumSprachenView(discord.ui.View):
         self._update_buttons()
 
     def _get_current(self) -> set:
-        """Aktuelle Raumeinstellungen oder globale als Basis."""
-        try:
-            from pymongo import MongoClient
-            import os
-            client = MongoClient(os.getenv("MONGODB_URI"))
-            col = client["vhabot"]["tsprachen_rooms"]
-            doc = col.find_one({"_id": str(self.channel_id)})
-            if not doc:
-                return get_active_langs().copy()  # kein Eintrag → globale
-            if doc.get("disabled"):
-                return set()  # explizit deaktiviert
-            langs = set(doc.get("langs", []))
-            return langs if langs else get_active_langs().copy()
-        except Exception:
+        """Aktuelle Raumeinstellungen — None bedeutet globale Einstellungen."""
+        room = get_room_langs(self.channel_id)
+        if room is None:
             return get_active_langs().copy()
+        return room.copy()
 
     def _update_buttons(self):
         self.clear_items()
         current = self._get_current()
-        room_setting = get_room_langs(self.channel_id)
 
-        # Alle wählbaren Sprachen: FIXED + OPTIONAL
+        # Alle wählbaren Sprachen für Raumsprachen — PT+EN auch abschaltbar!
         all_langs = {
             "PT": {"flag": "🇧🇷", "name": "Português"},
             "EN": {"flag": "🇬🇧", "name": "English"},
@@ -319,7 +308,9 @@ class RaumSprachenView(discord.ui.View):
                 )
                 return
 
-            current = self._get_current()
+            # Direkt aus DB lesen um Race Conditions zu vermeiden
+            room = get_room_langs(self.channel_id)
+            current = room.copy() if room is not None else get_active_langs().copy()
 
             if code in current:
                 current.discard(code)
@@ -328,7 +319,8 @@ class RaumSprachenView(discord.ui.View):
                 current.add(code)
                 action = "aktiviert"
 
-            set_room_langs(self.channel_id, current)
+            # Immer als explizite Raumeinstellung speichern (nicht disabled)
+            set_room_langs(self.channel_id, current, disabled=False)
             self._update_buttons()
             embed = self._make_embed()
             await interaction.response.edit_message(embed=embed, view=self)
@@ -367,12 +359,19 @@ class RaumSprachenView(discord.ui.View):
             return
         set_room_langs(self.channel_id, set(), disabled=True)
         self._update_buttons()
-        embed = self._make_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-        await interaction.followup.send(
-            f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
-            ephemeral=True
-        )
+        try:
+            embed = self._make_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
+            await interaction.followup.send(
+                f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
+                ephemeral=True
+            )
+        except Exception as e:
+            log.error(f"off_callback Fehler: {e}")
+            await interaction.response.send_message(
+                f"🚫 Übersetzung in #{self.channel_name} **deaktiviert**.",
+                ephemeral=True
+            )
 
     def _make_embed(self) -> discord.Embed:
         room_setting = get_room_langs(self.channel_id)
