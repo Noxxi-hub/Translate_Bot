@@ -476,8 +476,10 @@ async def on_message(message: discord.Message):
     if room_setting is not None:
         if len(room_setting) == 0:
             return  # Deaktiviert für diesen Kanal
+        # Raum hat eigene Einstellungen → exakt diese nutzen, KEINE fixen Sprachen
         active_langs = room_setting
     else:
+        # Kein Eintrag → globale Einstellungen (PT + EN immer aktiv)
         active_langs = get_active_languages()
 
     # Zielsprachen: nur was dieser Bot übernimmt, nicht DE/FR (Haupt-Bot)

@@ -280,12 +280,13 @@ class RaumSprachenView(discord.ui.View):
 
         for i, (code, info) in enumerate(lang_list):
             is_active = code in self.current
+            # Im Raummodus sind ALLE Sprachen schaltbar (auch PT + EN)
             btn = discord.ui.Button(
                 label=f"{info['flag']} {info['name']}",
                 style=discord.ButtonStyle.success if is_active else discord.ButtonStyle.secondary,
                 emoji="✅" if is_active else "❌",
                 custom_id=f"troom_{self.channel_id}_{code}",
-                row=i // 4  # 4 pro Zeile → Zeilen 0, 1, 2 (je 4 Buttons)
+                row=i // 4
             )
             btn.callback = self._make_callback(code)
             self.add_item(btn)
@@ -325,8 +326,9 @@ class RaumSprachenView(discord.ui.View):
                 self.current.add(code)
                 action = "aktiviert"
 
-            # In DB speichern
-            set_room_langs(self.channel_id, self.current.copy(), disabled=False)
+            # In DB speichern — im Raummodus KEINE fixen Sprachen erzwingen
+            langs_to_save = self.current.copy()
+            set_room_langs(self.channel_id, langs_to_save, disabled=False)
 
             self._update_buttons()
             embed = self._make_embed()
@@ -444,8 +446,8 @@ class TSprachenCog(commands.Cog):
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(name="traumsprachen")
-    async def cmd_traumsprachen(self, ctx, channel_id: int = None):
+    @commands.command(name="raumsprachen")
+    async def cmd_raumsprachen(self, ctx, channel_id: int = None):
         """Raumsprachen per Button verwalten. Verwendung: !traumsprachen [Kanal-ID]"""
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
