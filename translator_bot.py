@@ -73,7 +73,7 @@ def get_active_languages() -> set:
 
 
 def run_flask():
-    port = int(os.environ.get("PORT_TRANSLATOR", 10001))
+    port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
