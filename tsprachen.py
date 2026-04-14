@@ -39,29 +39,20 @@ OPTIONAL_LANGS = {
 
 ALLOWED_ROLES = {"R5", "R4", "DEV"}
 
-# ────────────────────────────────────────────────
-# MongoDB — EINE Verbindung für den ganzen Bot
-# (Verhindert langsame neue Verbindung bei jedem Aufruf)
-# ────────────────────────────────────────────────
-
-_mongo_client = None
-
-def get_client() -> MongoClient:
-    global _mongo_client
-    if _mongo_client is None:
-        _mongo_client = MongoClient(os.getenv("MONGODB_URI"))
-    return _mongo_client
-
-def get_col():
-    return get_client()["vhabot"]["tsprachen"]
-
-def get_room_col():
-    return get_client()["vhabot"]["tsprachen_rooms"]
-
 
 # ────────────────────────────────────────────────
 # MongoDB Helpers
 # ────────────────────────────────────────────────
+
+def get_col():
+    client = MongoClient(os.getenv("MONGODB_URI"))
+    return client["vhabot"]["tsprachen"]
+
+
+def get_room_col():
+    client = MongoClient(os.getenv("MONGODB_URI"))
+    return client["vhabot"]["tsprachen_rooms"]
+
 
 def get_active_langs() -> set:
     """Globale aktive Sprachen (inkl. FIXED_LANGS)."""
@@ -69,7 +60,7 @@ def get_active_langs() -> set:
         col = get_col()
         doc = col.find_one({"_id": "settings"})
         if not doc:
-            default = set(FIXED_LANGS)
+            default = {"PT", "EN"}
             col.update_one(
                 {"_id": "settings"},
                 {"$set": {"active": list(default)}},
@@ -77,11 +68,11 @@ def get_active_langs() -> set:
             )
             return default
         active = set(doc.get("active", list(FIXED_LANGS)))
-        active.update(FIXED_LANGS)  # PT + EN immer erzwingen
+        active.update(FIXED_LANGS)
         return active
     except Exception as e:
         log.error(f"Fehler beim Laden der Sprachen: {e}")
-        return set(FIXED_LANGS)
+        return {"PT", "EN"}
 
 
 def set_active_langs(langs: set):
@@ -101,9 +92,8 @@ def set_active_langs(langs: set):
 def get_room_langs(channel_id: int) -> set | None:
     """
     Raumsprachen für einen Kanal.
-    None  → kein Eintrag → globale Einstellungen nutzen
-    set() → disabled=True → Übersetzung komplett aus
-    set   → eigene Sprachen aktiv
+    Gibt None zurück wenn keine eigenen Einstellungen → globale nutzen.
+    Gibt leeres set zurück wenn Kanal deaktiviert.
     """
     try:
         col = get_room_col()
@@ -124,7 +114,7 @@ def set_room_langs(channel_id: int, langs: set | None, disabled: bool = False):
     try:
         col = get_room_col()
         if langs is None and not disabled:
-            # Reset → Eintrag löschen = globale Einstellungen
+            # Reset → Eintrag löschen
             col.delete_one({"_id": str(channel_id)})
         else:
             col.update_one(
@@ -148,7 +138,6 @@ def has_permission(member: discord.Member) -> bool:
 
 # ────────────────────────────────────────────────
 # Globale Sprachen — Button View
-# Nur OPTIONAL_LANGS sind schaltbar (10 Buttons = 2 Zeilen)
 # ────────────────────────────────────────────────
 
 class GlobalSprachenView(discord.ui.View):
@@ -160,16 +149,14 @@ class GlobalSprachenView(discord.ui.View):
     def _update_buttons(self):
         self.clear_items()
         active = get_active_langs()
-        lang_list = list(OPTIONAL_LANGS.items())
 
-        for i, (code, info) in enumerate(lang_list):
+        for code, info in OPTIONAL_LANGS.items():
             is_active = code in active
             btn = discord.ui.Button(
                 label=f"{info['flag']} {info['name']}",
                 style=discord.ButtonStyle.success if is_active else discord.ButtonStyle.secondary,
                 emoji="✅" if is_active else "❌",
-                custom_id=f"tlang_{code}",
-                row=i // 5  # 5 pro Zeile → Zeile 0 und 1
+                custom_id=f"tlang_{code}"
             )
             btn.callback = self._make_callback(code)
             self.add_item(btn)
@@ -244,6 +231,7 @@ class GlobalSprachenView(discord.ui.View):
             value="\n".join(status_lines),
             inline=False
         )
+
         embed.set_footer(
             text="Klicke auf einen Button um eine Sprache ein/auszuschalten",
             icon_url=LOGO_URL
@@ -253,50 +241,40 @@ class GlobalSprachenView(discord.ui.View):
 
 # ────────────────────────────────────────────────
 # Raumsprachen — Button View
-# PT + EN + 10 Optional = 12 Sprach-Buttons (3 Zeilen)
-# + Reset + Alle-aus = 2 Buttons (1 Zeile)
-# Gesamt: 14 Buttons auf 4 Zeilen — passt in Discord
 # ────────────────────────────────────────────────
 
 class RaumSprachenView(discord.ui.View):
     def __init__(self, author: discord.Member, channel_id: int, channel_name: str, current: set):
-        super().__init__(timeout=180)
+        super().__init__(timeout=120)
         self.author = author
         self.channel_id = channel_id
         self.channel_name = channel_name
-        self.current = current
+        self.current = current  # State im Memory — kein DB-Call beim Button-Klick
         self._update_buttons()
 
     def _update_buttons(self):
         self.clear_items()
-
-        # Alle Sprachen: PT, EN zuerst, dann Optional
         all_langs = {
             "PT": {"flag": "🇧🇷", "name": "Português"},
             "EN": {"flag": "🇬🇧", "name": "English"},
             **OPTIONAL_LANGS
         }
-        lang_list = list(all_langs.items())  # 12 Einträge
-
-        for i, (code, info) in enumerate(lang_list):
+        for code, info in all_langs.items():
             is_active = code in self.current
-            # Im Raummodus sind ALLE Sprachen schaltbar (auch PT + EN)
             btn = discord.ui.Button(
                 label=f"{info['flag']} {info['name']}",
                 style=discord.ButtonStyle.success if is_active else discord.ButtonStyle.secondary,
                 emoji="✅" if is_active else "❌",
-                custom_id=f"troom_{self.channel_id}_{code}",
-                row=i // 4
+                custom_id=f"troom_{self.channel_id}_{code}"
             )
             btn.callback = self._make_callback(code)
             self.add_item(btn)
 
-        # Zeile 3: Reset + Alle aus
         reset_btn = discord.ui.Button(
             label="📡 Globale Einstellungen",
             style=discord.ButtonStyle.primary,
             custom_id=f"troom_{self.channel_id}_reset",
-            row=3
+            row=4
         )
         reset_btn.callback = self._reset_callback
         self.add_item(reset_btn)
@@ -305,7 +283,7 @@ class RaumSprachenView(discord.ui.View):
             label="🚫 Alle aus",
             style=discord.ButtonStyle.danger,
             custom_id=f"troom_{self.channel_id}_off",
-            row=3
+            row=4
         )
         off_btn.callback = self._off_callback
         self.add_item(off_btn)
@@ -319,6 +297,7 @@ class RaumSprachenView(discord.ui.View):
                 )
                 return
 
+            # State im Memory updaten — kein DB-Call nötig
             if code in self.current:
                 self.current.discard(code)
                 action = "deaktiviert"
@@ -326,19 +305,14 @@ class RaumSprachenView(discord.ui.View):
                 self.current.add(code)
                 action = "aktiviert"
 
-            # In DB speichern — im Raummodus KEINE fixen Sprachen erzwingen
-            langs_to_save = self.current.copy()
-            set_room_langs(self.channel_id, langs_to_save, disabled=False)
+            # In DB speichern
+            set_room_langs(self.channel_id, self.current.copy(), disabled=False)
 
             self._update_buttons()
             embed = self._make_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
-            all_langs = {
-                "PT": {"flag": "🇧🇷", "name": "Português"},
-                "EN": {"flag": "🇬🇧", "name": "English"},
-                **OPTIONAL_LANGS
-            }
+            all_langs = {"PT": {"flag": "🇧🇷", "name": "Português"}, "EN": {"flag": "🇬🇧", "name": "English"}, **OPTIONAL_LANGS}
             info = all_langs.get(code, {"flag": "🌐", "name": code})
             await interaction.followup.send(
                 f"{info['flag']} **{info['name']}** in #{self.channel_name} {action}!",
@@ -353,7 +327,8 @@ class RaumSprachenView(discord.ui.View):
                 ephemeral=True
             )
             return
-        set_room_langs(self.channel_id, None)  # Eintrag löschen → globale Einstellungen
+        # DB-Eintrag löschen → globale Einstellungen
+        set_room_langs(self.channel_id, None)
         self.current = get_active_langs().copy()
         self._update_buttons()
         embed = self._make_embed()
@@ -421,6 +396,7 @@ class RaumSprachenView(discord.ui.View):
         return embed
 
 
+
 # ────────────────────────────────────────────────
 # Cog
 # ────────────────────────────────────────────────
@@ -435,43 +411,49 @@ class TSprachenCog(commands.Cog):
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
+        try:
+            async for msg in ctx.channel.history(limit=20):
+                if msg.author == ctx.guild.me and msg.embeds:
+                    if "Übersetzer-Bot • Globale Sprachen" in (msg.embeds[0].title or ""):
+                        await msg.delete()
+        except Exception:
+            pass
         view = GlobalSprachenView(ctx.author)
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
     @commands.command(name="raumsprachen")
     async def cmd_raumsprachen(self, ctx, channel_id: int = None):
-        """Raumsprachen per Button verwalten. Verwendung: !traumsprachen [Kanal-ID]"""
+        """Raumsprachen per Button verwalten."""
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
 
-        if channel_id is None:
-            await ctx.send(
-                "❓ **Verwendung:** `!traumsprachen [Kanal-ID]`\n"
-                "Tipp: `!kanalid` zeigt alle Kanal-IDs als Direktnachricht.",
-                delete_after=12
-            )
-            return
+        cid = channel_id if channel_id is not None else ctx.channel.id
+        ch = ctx.guild.get_channel(cid)
+        ch_name = ch.name if ch else str(cid)
 
-        ch = ctx.guild.get_channel(channel_id)
-        if ch is None:
-            await ctx.send(f"❌ Kanal `{channel_id}` nicht gefunden.", delete_after=8)
-            return
-        ch_name = ch.name
+        try:
+            async for msg in ctx.channel.history(limit=20):
+                if msg.author == ctx.guild.me and msg.embeds:
+                    if f"Raumsprachen • #{ch_name}" in (msg.embeds[0].title or ""):
+                        await msg.delete()
+        except Exception:
+            pass
 
-        # Aktuellen State laden
-        room_langs = get_room_langs(channel_id)
-        if room_langs is None:
-            # Kein Eintrag → globale Einstellungen als Ausgangspunkt anzeigen
+        # State einmal beim Öffnen laden
+        try:
+            col = get_room_col()
+            doc = col.find_one({"_id": str(cid)})
+            if not doc or doc.get("disabled"):
+                current = get_active_langs().copy()
+            else:
+                langs = set(doc.get("langs", []))
+                current = langs if langs else get_active_langs().copy()
+        except Exception:
             current = get_active_langs().copy()
-        elif len(room_langs) == 0:
-            # Deaktiviert
-            current = set()
-        else:
-            current = room_langs.copy()
 
-        view = RaumSprachenView(ctx.author, channel_id, ch_name, current)
+        view = RaumSprachenView(ctx.author, cid, ch_name, current)
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
@@ -485,12 +467,14 @@ class TSprachenCog(commands.Cog):
         lines = []
         for category, channels in ctx.guild.by_category():
             cat_name = category.name if category else "Ohne Kategorie"
-            text_channels = [c for c in channels if isinstance(c, discord.TextChannel)]
-            if not text_channels:
+            # TextChannel + ForumChannel beide anzeigen
+            relevant = [c for c in channels if isinstance(c, (discord.TextChannel, discord.ForumChannel))]
+            if not relevant:
                 continue
             lines.append(f"**{cat_name}**")
-            for ch in text_channels:
-                lines.append(f"• #{ch.name} — `{ch.id}`")
+            for ch in relevant:
+                ch_type = "📋 Forum" if isinstance(ch, discord.ForumChannel) else "#"
+                lines.append(f"• {ch_type} {ch.name} — `{ch.id}`")
 
         chunks = []
         current = []
