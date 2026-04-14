@@ -435,13 +435,6 @@ class TSprachenCog(commands.Cog):
         if not has_permission(ctx.author):
             await ctx.send("❌ Keine Berechtigung.", delete_after=5)
             return
-        try:
-            async for msg in ctx.channel.history(limit=20):
-                if msg.author == ctx.guild.me and msg.embeds:
-                    if "Übersetzer-Bot • Globale Sprachen" in (msg.embeds[0].title or ""):
-                        await msg.delete()
-        except Exception:
-            pass
         view = GlobalSprachenView(ctx.author)
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
@@ -466,15 +459,6 @@ class TSprachenCog(commands.Cog):
             await ctx.send(f"❌ Kanal `{channel_id}` nicht gefunden.", delete_after=8)
             return
         ch_name = ch.name
-
-        # Alte Menü-Nachrichten löschen
-        try:
-            async for msg in ctx.channel.history(limit=20):
-                if msg.author == ctx.guild.me and msg.embeds:
-                    if f"Raumsprachen • #{ch_name}" in (msg.embeds[0].title or ""):
-                        await msg.delete()
-        except Exception:
-            pass
 
         # Aktuellen State laden
         room_langs = get_room_langs(channel_id)

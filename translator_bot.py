@@ -239,49 +239,62 @@ async def translate_all(text: str, target_langs: list) -> dict:
     if not target_langs:
         return {}
 
-    codes_str  = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
-    format_str = "\n".join(f"{code}: ..." for code, _, _ in target_langs)
-    estimated  = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
+    import json as _json
+    codes_str = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
+    json_keys = ", ".join(f'"{code}": "..."' for code, _, _ in target_langs)
+    estimated = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
 
     try:
         result = await groq_call(
             model=GROQ_MODEL,
-            temperature=0.15,
+            temperature=0.1,
             max_tokens=estimated,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        f"Translate the user text into: {codes_str}.\n"
-                        f"Reply ONLY in this exact format (one language per block, "
-                        f"no extra text, no markdown):\n{format_str}"
+                        f"Translate the user text into these languages: {codes_str}.\n"
+                        f"Reply with VALID JSON ONLY — no markdown, no explanation:\n"
+                        f"{{{json_keys}}}"
                     )
                 },
                 {"role": "user", "content": text}
             ]
         )
 
-        codes = [code for code, _, _ in target_langs]
-        translations = {}
-        for i, code in enumerate(codes):
-            if i + 1 < len(codes):
-                next_code = codes[i + 1]
-                m = re.search(
-                    rf"^{code}:\s*(.+?)(?=^{next_code}:)",
-                    result, re.MULTILINE | re.DOTALL
-                )
-            else:
-                m = re.search(rf"^{code}:\s*(.+)", result, re.MULTILINE | re.DOTALL)
+        # JSON parsen
+        clean = result.strip()
+        clean = re.sub(r"^```(?:json)?\s*", "", clean)
+        clean = re.sub(r"\s*```$", "", clean)
 
-            if m:
-                translation = m.group(1).strip()
-                if translation and translation.lower() != text.lower():
-                    translations[code] = translation
+        parsed = _json.loads(clean)
+        translations = {}
+        for code, _, _ in target_langs:
+            val = parsed.get(code, "").strip()
+            if val and val.lower() != text.lower():
+                translations[code] = val
         return translations
 
     except Exception as e:
         log.error(f"Übersetzungsfehler (multi): {e}")
-        return {}
+        # Fallback: einzeln übersetzen
+        translations = {}
+        for code, lang_name, _ in target_langs:
+            try:
+                result = await groq_call(
+                    model=GROQ_MODEL,
+                    temperature=0.1,
+                    max_tokens=800,
+                    messages=[
+                        {"role": "system", "content": f"Translate to {lang_name}. Output ONLY the translation."},
+                        {"role": "user", "content": text}
+                    ]
+                )
+                if result and result.lower() != text.lower():
+                    translations[code] = result.strip()
+            except Exception:
+                pass
+        return translations
 
 
 # ────────────────────────────────────────────────
