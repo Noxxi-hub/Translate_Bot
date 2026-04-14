@@ -489,9 +489,28 @@ async def on_message(message: discord.Message):
     else:
         active_langs = get_active_languages()
 
-    # Zielsprachen: nur was dieser Bot übernimmt, nicht DE/FR (Haupt-Bot)
+    # Alle verfügbaren Sprachen inkl. DE+FR (für Forum-Raum nötig)
+    ALL_LANGS_FULL = [
+        ("DE", "German",               "🇩🇪 Deutsch"),
+        ("FR", "French",               "🇫🇷 Français"),
+        ("PT", "Brazilian Portuguese", "🇧🇷 Português"),
+        ("EN", "English",              "🇬🇧 English"),
+        ("JA", "Japanese",             "🇯🇵 日本語"),
+        ("ZH", "Chinese",              "🇨🇳 中文"),
+        ("KO", "Korean",               "🇰🇷 한국어"),
+        ("ES", "Spanish",              "🇪🇸 Español"),
+        ("IT", "Italian",              "🇮🇹 Italiano"),
+        ("RU", "Russian",              "🇷🇺 Русский"),
+        ("AR", "Arabic",               "🇸🇦 العربية"),
+        ("TR", "Turkish",              "🇹🇷 Türkçe"),
+    ]
+
+    # Forum-Raum → volle Sprachliste nutzen, sonst nur Bot-eigene Sprachen
+    is_forum_room = (channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID)
+    lang_pool = ALL_LANGS_FULL if is_forum_room else ALL_LANGS
+
     target_langs = [
-        t for t in ALL_LANGS
+        t for t in lang_pool
         if t[0] != lang and t[0] in active_langs
     ]
 
