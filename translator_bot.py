@@ -466,15 +466,21 @@ async def on_message(message: discord.Message):
     if lang == "OTHER":
         return
 
-    # Kanal-spezifische Sprachen prüfen (aus tsprachen.py / MongoDB)
-    # Bei Forum-Posts: erst Thread-ID prüfen, dann Forum-Kanal-ID (parent)
-    try:
-        from tsprachen import get_room_langs
-        room_setting = get_room_langs(message.channel.id)
-        if room_setting is None and hasattr(message.channel, "parent_id") and message.channel.parent_id:
-            room_setting = get_room_langs(message.channel.parent_id)
-    except Exception:
-        room_setting = None
+    # Forum-Raum: fixe Sprachen EN+PT (DE+FR macht Haupt-Bot)
+    FORUM_CHANNEL_ID = 1478065008960077866
+    channel_id = message.channel.id
+    parent_id = getattr(message.channel, 'parent_id', None)
+    if channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID:
+        room_setting = {"PT", "EN", "DE", "FR"}
+    else:
+        # Kanal-spezifische Sprachen prüfen (aus tsprachen.py / MongoDB)
+        try:
+            from tsprachen import get_room_langs
+            room_setting = get_room_langs(message.channel.id)
+            if room_setting is None and hasattr(message.channel, "parent_id") and message.channel.parent_id:
+                room_setting = get_room_langs(message.channel.parent_id)
+        except Exception:
+            room_setting = None
 
     if room_setting is not None:
         if len(room_setting) == 0:
