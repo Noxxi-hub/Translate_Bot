@@ -23,35 +23,41 @@ LOGO_URL = (
 # Sprachen die immer aktiv sind (können nicht abgeschaltet werden)
 FIXED_LANGS = {"PT", "EN"}
 
-# Alle zuschaltbaren Sprachen — kein DE/FR, das macht der Haupt-Bot
+# Zuschaltbare Sprachen — IT, NL, AR, TR, PL entfernt
 OPTIONAL_LANGS = {
     "JA": {"flag": "🇯🇵", "name": "日本語"},
     "ZH": {"flag": "🇨🇳", "name": "中文"},
     "KO": {"flag": "🇰🇷", "name": "한국어"},
     "ES": {"flag": "🇪🇸", "name": "Español"},
-    "IT": {"flag": "🇮🇹", "name": "Italiano"},
     "RU": {"flag": "🇷🇺", "name": "Русский"},
-    "AR": {"flag": "🇸🇦", "name": "العربية"},
-    "TR": {"flag": "🇹🇷", "name": "Türkçe"},
-    "PL": {"flag": "🇵🇱", "name": "Polski"},
-    "NL": {"flag": "🇳🇱", "name": "Nederlands"},
 }
 
 ALLOWED_ROLES = {"R5", "R4", "DEV"}
 
 
 # ────────────────────────────────────────────────
-# MongoDB Helpers
+# MongoDB — einmalige Verbindung (Connection Pool)
 # ────────────────────────────────────────────────
 
-def get_col():
-    client = MongoClient(os.getenv("MONGODB_URI"))
-    return client["vhabot"]["tsprachen"]
+_mongo_client: MongoClient | None = None
 
+def _get_client() -> MongoClient:
+    """Gibt den gemeinsamen MongoClient zurück (erstellt ihn einmalig)."""
+    global _mongo_client
+    if _mongo_client is None:
+        _mongo_client = MongoClient(
+            os.getenv("MONGODB_URI"),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000,
+        )
+    return _mongo_client
+
+def get_col():
+    return _get_client()["vhabot"]["tsprachen"]
 
 def get_room_col():
-    client = MongoClient(os.getenv("MONGODB_URI"))
-    return client["vhabot"]["tsprachen_rooms"]
+    return _get_client()["vhabot"]["tsprachen_rooms"]
 
 
 def get_active_langs() -> set:

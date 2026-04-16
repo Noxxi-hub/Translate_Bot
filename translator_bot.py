@@ -202,7 +202,7 @@ async def detect_language_llm(text: str) -> str:
                     "role": "system",
                     "content": (
                         "Detect the language. Reply ONLY with the ISO 639-1 code in uppercase "
-                        "(DE, FR, PT, EN, ES, IT, TR, PL, NL). "
+                        "(DE, FR, PT, EN, ES, RU, JA, ZH, KO). "
                         "If neutral/unclear reply: OTHER. No explanation."
                     )
                 },
@@ -218,7 +218,7 @@ async def detect_language_llm(text: str) -> str:
             m = re.search(r"\b([A-Z]{2})\b", result)
             lang = m.group(1) if m else "OTHER"
 
-        known = {"DE","FR","PT","EN","ES","IT","TR","PL","NL","OTHER"}
+        known = {"DE","FR","PT","EN","ES","RU","JA","ZH","KO","OTHER"}
         if lang in known:
             lang_cache[key] = lang
             if len(lang_cache) > 800:
@@ -290,19 +290,16 @@ async def translate_all(text: str, target_langs: list) -> dict:
 
 LANG_FLAGS = {
     "DE": "🇩🇪", "FR": "🇫🇷", "PT": "🇧🇷", "EN": "🇬🇧",
-    "JA": "🇯🇵", "ES": "🇪🇸", "IT": "🇮🇹", "RU": "🇷🇺",
-    "ZH": "🇨🇳", "AR": "🇸🇦", "KO": "🇰🇷", "TR": "🇹🇷",
-    "PL": "🇵🇱", "NL": "🇳🇱",
+    "JA": "🇯🇵", "ES": "🇪🇸", "RU": "🇷🇺",
+    "ZH": "🇨🇳", "KO": "🇰🇷",
 }
 
 LANG_NAMES = {
     "DE": "German",               "FR": "French",
     "PT": "Brazilian Portuguese", "EN": "English",
     "JA": "Japanese",             "ES": "Spanish",
-    "IT": "Italian",              "RU": "Russian",
-    "ZH": "Chinese",              "AR": "Arabic",
-    "KO": "Korean",               "TR": "Turkish",
-    "PL": "Polish",               "NL": "Dutch",
+    "RU": "Russian",              "ZH": "Chinese",
+    "KO": "Korean",
 }
 
 ALL_LANGS = [
@@ -312,10 +309,7 @@ ALL_LANGS = [
     ("ZH", "Chinese",              "🇨🇳 中文"),
     ("KO", "Korean",               "🇰🇷 한국어"),
     ("ES", "Spanish",              "🇪🇸 Español"),
-    ("IT", "Italian",              "🇮🇹 Italiano"),
     ("RU", "Russian",              "🇷🇺 Русский"),
-    ("AR", "Arabic",               "🇸🇦 العربية"),
-    ("TR", "Turkish",              "🇹🇷 Türkçe"),
 ]
 
 # ────────────────────────────────────────────────
@@ -499,10 +493,7 @@ async def on_message(message: discord.Message):
         ("ZH", "Chinese",              "🇨🇳 中文"),
         ("KO", "Korean",               "🇰🇷 한국어"),
         ("ES", "Spanish",              "🇪🇸 Español"),
-        ("IT", "Italian",              "🇮🇹 Italiano"),
         ("RU", "Russian",              "🇷🇺 Русский"),
-        ("AR", "Arabic",               "🇸🇦 العربية"),
-        ("TR", "Turkish",              "🇹🇷 Türkçe"),
     ]
 
     # Forum-Raum → volle Sprachliste nutzen, sonst nur Bot-eigene Sprachen
