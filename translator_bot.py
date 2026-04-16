@@ -246,15 +246,23 @@ async def translate_all(text: str, target_langs: list) -> dict:
     try:
         result = await groq_call(
             model=GROQ_MODEL,
-            temperature=0.15,
+            temperature=0.1,
             max_tokens=estimated,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        f"Translate the user text into: {codes_str}.\n"
-                        f"Reply ONLY in this exact format (one language per block, "
-                        f"no extra text, no markdown):\n{format_str}"
+                        f"You are a precise translator for a mobile strategy game community (alliance chat).\n"
+                        f"Context: Players discuss war coordination, attacks, building upgrades, events, and alliance management.\n"
+                        f"Common terms to keep untranslated: R1/R2/R3/R4/R5 (rank titles), coordinates like R1 X:123 Y:456, server numbers, player names.\n\n"
+                        f"Translate the text into these languages: {codes_str}.\n"
+                        f"Rules:\n"
+                        f"- Translate naturally and colloquially, like a real player would write\n"
+                        f"- Keep game-specific terms, names, coordinates, and numbers as-is\n"
+                        f"- If a word is unclear, choose the most natural game-chat interpretation\n"
+                        f"- Do NOT add explanations, notes, or markdown\n"
+                        f"- Reply ONLY in this exact format, nothing else:\n"
+                        f"{format_str}"
                     )
                 },
                 {"role": "user", "content": text}
@@ -496,9 +504,9 @@ async def on_message(message: discord.Message):
         ("RU", "Russian",              "🇷🇺 Русский"),
     ]
 
-    # Forum-Raum → volle Sprachliste nutzen, sonst nur Bot-eigene Sprachen
-    is_forum_room = (channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID)
-    lang_pool = ALL_LANGS_FULL if is_forum_room else ALL_LANGS
+    # Forum-Raum → volle Sprachliste nutzen, sonst ebenfalls volle Liste
+    # (DE/FR können jetzt per !traumsprachen pro Raum aktiviert werden)
+    lang_pool = ALL_LANGS_FULL
 
     target_langs = [
         t for t in lang_pool

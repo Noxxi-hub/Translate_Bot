@@ -261,6 +261,8 @@ class RaumSprachenView(discord.ui.View):
     def _update_buttons(self):
         self.clear_items()
         all_langs = {
+            "DE": {"flag": "🇩🇪", "name": "Deutsch"},
+            "FR": {"flag": "🇫🇷", "name": "Français"},
             "PT": {"flag": "🇧🇷", "name": "Português"},
             "EN": {"flag": "🇬🇧", "name": "English"},
             **OPTIONAL_LANGS
@@ -318,7 +320,7 @@ class RaumSprachenView(discord.ui.View):
             embed = self._make_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
-            all_langs = {"PT": {"flag": "🇧🇷", "name": "Português"}, "EN": {"flag": "🇬🇧", "name": "English"}, **OPTIONAL_LANGS}
+            all_langs = {"DE": {"flag": "🇩🇪", "name": "Deutsch"}, "FR": {"flag": "🇫🇷", "name": "Français"}, "PT": {"flag": "🇧🇷", "name": "Português"}, "EN": {"flag": "🇬🇧", "name": "English"}, **OPTIONAL_LANGS}
             info = all_langs.get(code, {"flag": "🌐", "name": code})
             await interaction.followup.send(
                 f"{info['flag']} **{info['name']}** in #{self.channel_name} {action}!",
@@ -381,6 +383,8 @@ class RaumSprachenView(discord.ui.View):
         embed.add_field(name="Status", value=status_text, inline=False)
 
         all_langs = {
+            "DE": {"flag": "🇩🇪", "name": "Deutsch"},
+            "FR": {"flag": "🇫🇷", "name": "Français"},
             "PT": {"flag": "🇧🇷", "name": "Português"},
             "EN": {"flag": "🇬🇧", "name": "English"},
             **OPTIONAL_LANGS
