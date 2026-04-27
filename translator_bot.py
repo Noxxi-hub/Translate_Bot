@@ -113,6 +113,7 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
         temperature=temperature,
         max_output_tokens=max_tokens,
         system_instruction=system_text,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),  # Thinking deaktiviert — unnötig für Übersetzungen
     )
 
     for attempt in range(retries):
