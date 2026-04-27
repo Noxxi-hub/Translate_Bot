@@ -1,5 +1,4 @@
 discord.py
-groq
 flask
+google-genai
 pymongo
-dnspython
