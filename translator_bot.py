@@ -34,7 +34,7 @@ LOGO_URL = (
     "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
 )
 
-GEMINI_MODEL = "gemini-2.5-flash-lite-preview-06-17"
+GEMINI_MODEL = "gemini-2.0-flash"
 BOT_LOG_CHANNEL_ID = 1484252260614537247
 
 # Feste Zielsprachen dieses Bots (PT + EN immer aktiv)
