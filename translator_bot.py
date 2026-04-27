@@ -8,7 +8,8 @@ import threading
 import logging
 from collections import deque
 from flask import Flask
-from groq import Groq
+from google import genai
+from google.genai import types
 
 # ────────────────────────────────────────────────
 # LOGGING
@@ -33,7 +34,7 @@ LOGO_URL = (
     "?ex=69bd8dd7&is=69bc3c57&hm=de6fea399dd30f97d2a14e1515c9e7f91d81d0d9ea111f13e0757d42eb12a0e5&"
 )
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GEMINI_MODEL = "gemini-2.5-flash-lite-preview-06-17"
 BOT_LOG_CHANNEL_ID = 1484252260614537247
 
 # Feste Zielsprachen dieses Bots (PT + EN immer aktiv)
@@ -51,13 +52,13 @@ processed_messages_set = set()
 
 translate_active = True
 
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY_TRANSLATOR"))  # eigener API-Key!
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_TRANSLATOR"))
 
-# Semaphore: max. 2 gleichzeitige Groq-Calls
-groq_semaphore = asyncio.Semaphore(2)
+# Semaphore: max. 4 gleichzeitige Gemini-Calls
+gemini_semaphore = asyncio.Semaphore(4)
 
 # Globale Rate-Limit-Pause
-_groq_rate_limit_until: float = 0.0
+_gemini_rate_limit_until: float = 0.0
 
 user_last_translation: dict[int, float] = {}
 TRANSLATION_COOLDOWN = 8.0
@@ -88,59 +89,73 @@ def ping():
 
 
 # ────────────────────────────────────────────────
-# GROQ ASYNC WRAPPER mit Retry
+# GEMINI ASYNC WRAPPER mit Retry
 # ────────────────────────────────────────────────
 
-async def groq_call(model: str, messages: list, temperature: float = 0.15,
-                    max_tokens: int = 500, retries: int = 3) -> str:
-    global _groq_rate_limit_until
+async def gemini_call(model: str, messages: list, temperature: float = 0.1,
+                      max_tokens: int = 500, retries: int = 3) -> str:
+    global _gemini_rate_limit_until
     loop = asyncio.get_event_loop()
     wait = 4
 
+    system_text = None
+    contents = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            system_text = content
+        elif role == "user":
+            if isinstance(content, str):
+                contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
+
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+        system_instruction=system_text,
+    )
+
     for attempt in range(retries):
         now = asyncio.get_event_loop().time()
-        pause = _groq_rate_limit_until - now
+        pause = _gemini_rate_limit_until - now
         if pause > 0:
             log.info(f"Rate-Limit-Pause: warte {pause:.1f}s")
             await asyncio.sleep(pause)
 
-        async with groq_semaphore:
+        async with gemini_semaphore:
             try:
                 resp = await loop.run_in_executor(
                     None,
-                    lambda: groq_client.chat.completions.create(
+                    lambda: gemini_client.models.generate_content(
                         model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        messages=messages
+                        contents=contents,
+                        config=config,
                     )
                 )
-                if resp.usage:
-                    token_counter["prompt"]     += resp.usage.prompt_tokens
-                    token_counter["completion"] += resp.usage.completion_tokens
-                    token_counter["total"]      += resp.usage.total_tokens
-                    log.info(
-                        f"Tokens: +{resp.usage.total_tokens} "
-                        f"(heute gesamt: {token_counter['total']})"
-                    )
-                return resp.choices[0].message.content.strip()
+                if resp.usage_metadata:
+                    total = (resp.usage_metadata.prompt_token_count or 0) +                             (resp.usage_metadata.candidates_token_count or 0)
+                    token_counter["prompt"]     += resp.usage_metadata.prompt_token_count or 0
+                    token_counter["completion"] += resp.usage_metadata.candidates_token_count or 0
+                    token_counter["total"]      += total
+                    log.info(f"Tokens: +{total} (heute gesamt: {token_counter['total']})")
+                return resp.text.strip()
 
             except Exception as e:
                 err = str(e)
-                if "429" in err or "rate" in err.lower():
-                    _groq_rate_limit_until = asyncio.get_event_loop().time() + wait
+                if "429" in err or "quota" in err.lower() or "rate" in err.lower():
+                    _gemini_rate_limit_until = asyncio.get_event_loop().time() + wait
                     log.warning(f"Rate-Limit (Versuch {attempt+1}/{retries}) – globale Pause {wait}s")
                     await asyncio.sleep(wait)
                     wait = min(wait * 2, 60)
-                elif "5" in err[:3]:
+                elif "5" in err[:3] or "server" in err.lower():
                     log.warning(f"Server-Fehler (Versuch {attempt+1}/{retries}) – warte {wait}s")
                     await asyncio.sleep(wait)
                     wait *= 2
                 else:
-                    log.error(f"Groq-Fehler: {e}")
+                    log.error(f"Gemini-Fehler: {e}")
                     raise
 
-    raise Exception("Groq nicht erreichbar nach mehreren Versuchen")
+    raise Exception("Gemini nicht erreichbar nach mehreren Versuchen")
 
 
 # ────────────────────────────────────────────────
@@ -193,8 +208,8 @@ async def detect_language_llm(text: str) -> str:
         return lang_cache[key]
 
     try:
-        result = await groq_call(
-            model=GROQ_MODEL,
+        result = await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.0,
             max_tokens=5,
             messages=[
@@ -244,8 +259,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
     estimated  = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
 
     try:
-        result = await groq_call(
-            model=GROQ_MODEL,
+        result = await gemini_call(
+            model=GEMINI_MODEL,
             temperature=0.1,
             max_tokens=estimated,
             messages=[
