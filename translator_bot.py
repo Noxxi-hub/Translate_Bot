@@ -57,6 +57,9 @@ gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_TRANSLATOR"))
 # Semaphore: max. 4 gleichzeitige Gemini-Calls
 gemini_semaphore = asyncio.Semaphore(4)
 
+import concurrent.futures as _futures
+_gemini_executor = _futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="gemini_t")
+
 # Globale Rate-Limit-Pause
 _gemini_rate_limit_until: float = 0.0
 
@@ -126,7 +129,7 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
         async with gemini_semaphore:
             try:
                 resp = await loop.run_in_executor(
-                    None,
+                    _gemini_executor,
                     lambda: gemini_client.models.generate_content(
                         model=model,
                         contents=contents,
