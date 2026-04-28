@@ -6,10 +6,19 @@ import time
 import asyncio
 import threading
 import logging
+import json
 from collections import deque
 from flask import Flask
 from google import genai
 from google.genai import types
+
+# Lokale Spracherkennung - kein API Call mehr
+try:
+    from langdetect import detect_langs, DetectorFactory
+    DetectorFactory.seed = 0
+    LANGDETECT_AVAILABLE = True
+except ImportError:
+    LANGDETECT_AVAILABLE = False
 
 # ────────────────────────────────────────────────
 # LOGGING
@@ -38,7 +47,6 @@ GEMINI_MODEL = "gemini-2.5-flash-lite"
 BOT_LOG_CHANNEL_ID = 1484252260614537247
 
 # Feste Zielsprachen dieses Bots (PT + EN immer aktiv)
-# Weitere können per !tsprachen zugeschaltet werden
 FIXED_LANGS = {"PT", "EN"}
 
 # ────────────────────────────────────────────────
@@ -60,13 +68,14 @@ gemini_semaphore = asyncio.Semaphore(4)
 import concurrent.futures as _futures
 _gemini_executor = _futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="gemini_t")
 
-# Globale Rate-Limit-Pause
-_gemini_rate_limit_until: float = 0.0
-
 user_last_translation: dict[int, float] = {}
 TRANSLATION_COOLDOWN = 8.0
 
 token_counter = {"prompt": 0, "completion": 0, "total": 0}
+
+# Caches
+lang_cache: dict[str, str] = {}
+translation_cache: dict[str, dict] = {}
 
 def get_active_languages() -> set:
     """Gibt aktive Sprachen zurück — liest aus tsprachen.py (MongoDB)."""
@@ -92,12 +101,11 @@ def ping():
 
 
 # ────────────────────────────────────────────────
-# GEMINI ASYNC WRAPPER mit Retry
+# GEMINI ASYNC WRAPPER mit Retry - OPTIMIERT
 # ────────────────────────────────────────────────
 
 async def gemini_call(model: str, messages: list, temperature: float = 0.1,
                       max_tokens: int = 500, retries: int = 3) -> str:
-    global _gemini_rate_limit_until
     loop = asyncio.get_event_loop()
     wait = 4
 
@@ -116,16 +124,11 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
         temperature=temperature,
         max_output_tokens=max_tokens,
         system_instruction=system_text,
-        thinking_config=types.ThinkingConfig(thinking_budget=0),  # Thinking deaktiviert — unnötig für Übersetzungen
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),  # AFC aus!
     )
 
     for attempt in range(retries):
-        now = asyncio.get_event_loop().time()
-        pause = _gemini_rate_limit_until - now
-        if pause > 0:
-            log.info(f"Rate-Limit-Pause: warte {pause:.1f}s")
-            await asyncio.sleep(pause)
-
         async with gemini_semaphore:
             try:
                 resp = await loop.run_in_executor(
@@ -137,7 +140,7 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
                     )
                 )
                 if resp.usage_metadata:
-                    total = (resp.usage_metadata.prompt_token_count or 0) +                             (resp.usage_metadata.candidates_token_count or 0)
+                    total = (resp.usage_metadata.prompt_token_count or 0) + (resp.usage_metadata.candidates_token_count or 0)
                     token_counter["prompt"]     += resp.usage_metadata.prompt_token_count or 0
                     token_counter["completion"] += resp.usage_metadata.candidates_token_count or 0
                     token_counter["total"]      += total
@@ -145,16 +148,15 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
                 return resp.text.strip()
 
             except Exception as e:
-                err = str(e)
-                if "429" in err or "quota" in err.lower() or "rate" in err.lower():
-                    _gemini_rate_limit_until = asyncio.get_event_loop().time() + wait
-                    log.warning(f"Rate-Limit (Versuch {attempt+1}/{retries}) – globale Pause {wait}s")
+                err = str(e).lower()
+                if "429" in err or "quota" in err or "resource_exhausted" in err or "rate" in err:
+                    log.warning(f"Rate-Limit (Versuch {attempt+1}/{retries}) – warte {wait}s")
                     await asyncio.sleep(wait)
                     wait = min(wait * 2, 60)
-                elif "5" in err[:3] or "server" in err.lower():
+                elif "503" in err or "500" in err or "502" in err or "unavailable" in err or "server" in err:
                     log.warning(f"Server-Fehler (Versuch {attempt+1}/{retries}) – warte {wait}s")
                     await asyncio.sleep(wait)
-                    wait *= 2
+                    wait = min(wait * 2, 30)
                 else:
                     log.error(f"Gemini-Fehler: {e}")
                     raise
@@ -163,10 +165,8 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
 
 
 # ────────────────────────────────────────────────
-# SPRACHE ERKENNEN — regelbasiert (kein API-Call)
+# SPRACHE ERKENNEN — LOKAL, KEIN API-CALL
 # ────────────────────────────────────────────────
-
-lang_cache: dict[str, str] = {}
 
 _NEUTRAL = {
     "ok","okay","lol","gg","wp","xd","haha","hahaha","😂","👍","👋","gn","gm",
@@ -174,13 +174,13 @@ _NEUTRAL = {
 }
 
 def _script_detect(text: str) -> str | None:
-    """Erkennt Sprache anhand von Unicode-Blöcken — kein API-Call nötig."""
-    cjk    = sum(1 for c in text if "\u4e00" <= c <= "\u9fff" or "\u3400" <= c <= "\u4dbf")
-    hira   = sum(1 for c in text if "\u3040" <= c <= "\u309f")
-    kata   = sum(1 for c in text if "\u30a0" <= c <= "\u30ff")
-    hangul = sum(1 for c in text if "\uac00" <= c <= "\ud7a3")
-    arabic = sum(1 for c in text if "\u0600" <= c <= "\u06ff")
-    cyril  = sum(1 for c in text if "\u0400" <= c <= "\u04ff")
+    """Erkennt Sprache anhand von Unicode-Blöcken."""
+    cjk    = sum(1 for c in text if "一" <= c <= "鿿" or "㐀" <= c <= "䶿")
+    hira   = sum(1 for c in text if "぀" <= c <= "ゟ")
+    kata   = sum(1 for c in text if "゠" <= c <= "ヿ")
+    hangul = sum(1 for c in text if "가" <= c <= "힣")
+    arabic = sum(1 for c in text if "؀" <= c <= "ۿ")
+    cyril  = sum(1 for c in text if "Ѐ" <= c <= "ӿ")
     total  = max(len(text), 1)
 
     if (hira + kata) / total > 0.15: return "JA"
@@ -192,7 +192,7 @@ def _script_detect(text: str) -> str | None:
 
 
 async def detect_language_llm(text: str) -> str:
-    """Erkennt Sprache — zuerst regelbasiert, dann LLM nur wenn nötig."""
+    """Erkennt Sprache LOKAL — 0 API-Calls."""
     stripped = text.strip()
 
     if not stripped or len(stripped) < 2:
@@ -211,54 +211,48 @@ async def detect_language_llm(text: str) -> str:
     if key in lang_cache:
         return lang_cache[key]
 
-    try:
-        result = await gemini_call(
-            model=GEMINI_MODEL,
-            temperature=0.0,
-            max_tokens=5,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Detect the language. Reply ONLY with the ISO 639-1 code in uppercase "
-                        "(DE, FR, PT, EN, ES, RU, JA, ZH, KO). "
-                        "If neutral/unclear reply: OTHER. No explanation."
-                    )
-                },
-                {"role": "user", "content": stripped[:200]}
-            ]
-        )
-        result = result.upper().strip()
-        if result.startswith("PT"):
-            lang = "PT"
-        elif re.match(r"^[A-Z]{2}$", result):
-            lang = result
-        else:
-            m = re.search(r"\b([A-Z]{2})\b", result)
-            lang = m.group(1) if m else "OTHER"
+    lang = "OTHER"
+    if LANGDETECT_AVAILABLE:
+        try:
+            langs = detect_langs(stripped)
+            code = langs[0].lang.upper()
+            mapping = {"PT": "PT", "EN": "EN", "DE": "DE", "FR": "FR", "ES": "ES", "RU": "RU", "JA": "JA", "ZH-CN": "ZH", "ZH": "ZH", "KO": "KO"}
+            lang = mapping.get(code, "OTHER")
+        except:
+            lang = "OTHER"
+    else:
+        # Fallback: einfache Heuristik
+        if re.search(r'(der|die|das|und|ich|nicht)', stripped.lower()): lang = "DE"
+        elif re.search(r'(the|and|you|for)', stripped.lower()): lang = "EN"
+        elif re.search(r'(le|la|et|vous|pour)', stripped.lower()): lang = "FR"
+        elif re.search(r'(o|a|e|que|para)', stripped.lower()): lang = "PT"
 
-        known = {"DE","FR","PT","EN","ES","RU","JA","ZH","KO","OTHER"}
-        if lang in known:
-            lang_cache[key] = lang
-            if len(lang_cache) > 800:
-                for k in list(lang_cache.keys())[:200]:
-                    del lang_cache[k]
-        return lang
+    known = {"DE","FR","PT","EN","ES","RU","JA","ZH","KO","OTHER"}
+    if lang not in known:
+        lang = "OTHER"
 
-    except Exception as e:
-        log.error(f"Spracherkennungs-Fehler: {e}")
-        return "OTHER"
+    lang_cache[key] = lang
+    if len(lang_cache) > 800:
+        for k in list(lang_cache.keys())[:200]:
+            del lang_cache[k]
+    return lang
 
 
 # ────────────────────────────────────────────────
-# ÜBERSETZEN
+# ÜBERSETZEN - MIT CACHE
 # ────────────────────────────────────────────────
 
 async def translate_all(text: str, target_langs: list) -> dict:
     if not target_langs:
         return {}
 
-    codes     = [code for code, _, _ in target_langs]
+    codes = [code for code, _, _ in target_langs]
+    cache_key = f"{text[:200]}_{'_'.join(codes)}"
+    
+    if cache_key in translation_cache:
+        log.info(f"Cache-Hit für Übersetzung")
+        return translation_cache[cache_key]
+
     codes_str = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
     json_keys = ", ".join(f'"{code}": "..."' for code in codes)
     estimated = max(800, min(4000, int(len(text) * 2.5 * len(target_langs))))
@@ -272,16 +266,28 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a professional translator. Your only job is to translate text accurately.\n"
-                        f"The text comes from a Discord chat of a mobile game alliance (Mecha Fire).\n\n"
-                        f"Translate the text into these {len(codes)} languages: {codes_str}.\n\n"
-                        f"STRICT RULES — follow exactly:\n"
-                        f"1. Translate the MEANING faithfully — do not paraphrase, summarize, or change the message\n"
-                        f"2. Keep the same tone: if the original is funny, keep it funny; if serious, keep it serious\n"
-                        f"3. Keep these UNTRANSLATED: R1 R2 R3 R4 R5, coordinates (X:123 Y:456), server numbers, player names, @mentions, alliance names\n"
-                        f"4. Emojis stay as-is\n"
-                        f"5. Do NOT add explanations, notes, or extra text\n"
-                        f"6. Output ONLY valid JSON with these exact keys:\n"
+                        f"You are a professional translator. Your only job is to translate text accurately.
+"
+                        f"The text comes from a Discord chat of a mobile game alliance (Mecha Fire).
+
+"
+                        f"Translate the text into these {len(codes)} languages: {codes_str}.
+
+"
+                        f"STRICT RULES — follow exactly:
+"
+                        f"1. Translate the MEANING faithfully — do not paraphrase, summarize, or change the message
+"
+                        f"2. Keep the same tone: if the original is funny, keep it funny; if serious, keep it serious
+"
+                        f"3. Keep these UNTRANSLATED: R1 R2 R3 R4 R5, coordinates (X:123 Y:456), server numbers, player names, @mentions, alliance names
+"
+                        f"4. Emojis stay as-is
+"
+                        f"5. Do NOT add explanations, notes, or extra text
+"
+                        f"6. Output ONLY valid JSON with these exact keys:
+"
                         f"{{{json_keys}}}"
                     )
                 },
@@ -289,8 +295,6 @@ async def translate_all(text: str, target_langs: list) -> dict:
             ]
         )
 
-        # JSON parsen
-        import json as _json
         clean = result.strip()
         if clean.startswith("```"):
             clean = clean.split("```")[1]
@@ -298,11 +302,10 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 clean = clean[4:]
         clean = clean.strip()
 
-        parsed = _json.loads(clean)
+        parsed = json.loads(clean)
         translations = {}
         max_len = max(len(text) * 6, 500)
 
-        # Wörter des Originals für Ähnlichkeitsprüfung
         original_words = set(re.sub(r'[^\w\s]', '', text.lower()).split())
 
         for code in codes:
@@ -310,33 +313,36 @@ async def translate_all(text: str, target_langs: list) -> dict:
             if not val:
                 continue
 
-            # Exakte Kopie
             if val.lower() == text.lower():
                 log.warning(f"Übersetzung identisch mit Original ({code}) — verworfen")
                 continue
 
-            # Ähnlichkeitsprüfung: wenn >70% der Wörter identisch mit Original → nicht übersetzt
             if len(original_words) >= 3:
                 val_words = set(re.sub(r'[^\w\s]', '', val.lower()).split())
                 overlap = len(original_words & val_words) / len(original_words)
                 if overlap > 0.70:
-                    log.warning(f"Übersetzung zu ähnlich zum Original ({code}): {overlap:.0%} Übereinstimmung — verworfen")
+                    log.warning(f"Übersetzung zu ähnlich ({code}): {overlap:.0%} — verworfen")
                     continue
 
-            # Loop-Erkennung: wenn ein einzelnes Wort > 15x wiederholt → Müll
             words = val.split()
             if words:
                 most_common = max(set(words), key=words.count)
                 if words.count(most_common) > 15:
-                    log.warning(f"Loop-Übersetzung erkannt ({code}): '{most_common}' x{words.count(most_common)} — verworfen")
+                    log.warning(f"Loop erkannt ({code}) — verworfen")
                     continue
 
-            # Längen-Check
             if len(val) > max_len:
-                log.warning(f"Übersetzung zu lang ({code}): {len(val)} Zeichen — abgeschnitten")
                 val = val[:max_len]
 
             translations[code] = val
+
+        # Cache speichern
+        if translations:
+            translation_cache[cache_key] = translations
+            if len(translation_cache) > 500:
+                # Alte Einträge löschen
+                for k in list(translation_cache.keys())[:100]:
+                    del translation_cache[k]
 
         return translations
 
@@ -381,7 +387,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(
-    command_prefix="!t",   # Prefix !t um Konflikte mit Haupt-Bot zu vermeiden
+    command_prefix="!t",
     intents=intents,
     help_command=None,
     case_insensitive=True
@@ -406,16 +412,23 @@ async def on_ready():
 
     log.info(f"→ {bot.user}  •  ÜBERSETZER-BOT ONLINE  •  {discord.utils.utcnow():%Y-%m-%d %H:%M UTC}")
     log.info(f"Aktive Sprachen: {get_active_languages()}")
+    if not LANGDETECT_AVAILABLE:
+        log.warning("langdetect nicht installiert - nutze Fallback-Heuristik. Installiere mit: pip install langdetect")
 
     if BOT_LOG_CHANNEL_ID:
         channel = bot.get_channel(BOT_LOG_CHANNEL_ID)
         if channel:
             if errors:
-                msg = "⚠️ **Übersetzer-Bot gestartet mit Fehlern:**\n" + "\n".join(errors)
+                msg = "⚠️ **Übersetzer-Bot gestartet mit Fehlern:**
+" + "
+".join(errors)
             else:
                 msg = (
-                    "✅ **Übersetzer-Bot erfolgreich gestartet!**\n"
-                    "🔧 tsprachen.py • geladen"
+                    "✅ **Übersetzer-Bot erfolgreich gestartet!**
+"
+                    "🔧 tsprachen.py • geladen
+"
+                    "⚡ Optimiert: Lokale Spracherkennung, AFC deaktiviert, Cache aktiv"
                 )
             await channel.send(msg)
 
@@ -431,7 +444,8 @@ async def cmd_ping(ctx):
     embed.add_field(name="📡 Latenz", value=f"`{latency}ms`", inline=True)
     embed.add_field(name="📊 Tokens heute", value=f"`{token_counter['total']}`", inline=True)
     embed.add_field(name="🌐 Aktive Sprachen", value=", ".join(sorted(get_active_languages())), inline=False)
-    embed.set_footer(text="VHA Übersetzer-Bot • Online", icon_url=LOGO_URL)
+    embed.add_field(name="💾 Cache", value=f"Lang: {len(lang_cache)} | Trans: {len(translation_cache)}", inline=True)
+    embed.set_footer(text="VHA Übersetzer-Bot • Optimiert", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
 
@@ -451,27 +465,24 @@ async def cmd_translate(ctx, action: str = None):
         await ctx.send("🔴 Übersetzer-Bot **deaktiviert**.")
     elif action == "status":
         status = "✅ Aktiv" if translate_active else "🔴 Inaktiv"
-        await ctx.send(f"**Übersetzer-Bot Status:** {status}\n**Sprachen:** {', '.join(sorted(get_active_languages()))}")
+        await ctx.send(f"**Übersetzer-Bot Status:** {status}
+**Sprachen:** {', '.join(sorted(get_active_languages()))}")
     else:
         await ctx.send("❓ Unbekannte Option.")
 
 
 
 # ────────────────────────────────────────────────
-# SPRACHEN & RAUMSPRACHEN — via tsprachen.py Cog
+# SPRACHEN & RAUMSPRACHEN
 # ────────────────────────────────────────────────
-# Befehle: !tsprachen, !traumsprachen, !tkanalid
-# Alles über tsprachen.py (MongoDB, Buttons)
 
 @bot.event
 async def on_message(message: discord.Message):
     global processed_messages, processed_messages_set, translate_active
 
-    # Bots ignorieren (verhindert gegenseitige Übersetzung)
     if message.author.bot:
         return
 
-    # GIF & YouTube ignorieren
     if (
         any(a.filename.lower().endswith(".gif") or (a.content_type and "gif" in a.content_type.lower())
             for a in message.attachments)
@@ -480,7 +491,6 @@ async def on_message(message: discord.Message):
     ):
         return
 
-    # Doppelverarbeitung verhindern
     if message.id in processed_messages_set:
         return
     if len(processed_messages) == processed_messages.maxlen:
@@ -488,7 +498,6 @@ async def on_message(message: discord.Message):
     processed_messages.append(message.id)
     processed_messages_set.add(message.id)
 
-    # Commands verarbeiten
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
@@ -500,35 +509,29 @@ async def on_message(message: discord.Message):
     if not content or len(content) < 2:
         return
 
-    # Nur-Link → skip
     if re.match(r'^https?://\S+$', content):
         return
 
-    # Links aus Text entfernen
     content_cleaned = re.sub(r'https?://\S+', '', content).strip()
     if not content_cleaned or len(content_cleaned) < 2:
         return
     content = content_cleaned
 
-    # Cooldown pro User
     now = time.time()
     if now - user_last_translation.get(message.author.id, 0) < TRANSLATION_COOLDOWN:
         return
     user_last_translation[message.author.id] = now
 
-    # Sprache erkennen
     lang = await detect_language_llm(content)
     if lang == "OTHER":
         return
 
-    # Forum-Raum: fixe Sprachen EN+PT (DE+FR macht Haupt-Bot)
     FORUM_CHANNEL_ID = 1478065008960077866
     channel_id = message.channel.id
     parent_id = getattr(message.channel, 'parent_id', None)
     if channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID:
         room_setting = {"PT", "EN", "DE", "FR"}
     else:
-        # Kanal-spezifische Sprachen prüfen (aus tsprachen.py / MongoDB)
         try:
             from tsprachen import get_room_langs
             room_setting = get_room_langs(message.channel.id)
@@ -539,12 +542,11 @@ async def on_message(message: discord.Message):
 
     if room_setting is not None:
         if len(room_setting) == 0:
-            return  # Deaktiviert für diesen Kanal
+            return
         active_langs = room_setting
     else:
         active_langs = get_active_languages()
 
-    # Alle verfügbaren Sprachen inkl. DE+FR (für Forum-Raum nötig)
     ALL_LANGS_FULL = [
         ("DE", "German",               "🇩🇪 Deutsch"),
         ("FR", "French",               "🇫🇷 Français"),
@@ -557,8 +559,6 @@ async def on_message(message: discord.Message):
         ("RU", "Russian",              "🇷🇺 Русский"),
     ]
 
-    # Forum-Raum → volle Sprachliste nutzen, sonst ebenfalls volle Liste
-    # (DE/FR können jetzt per !traumsprachen pro Raum aktiviert werden)
     lang_pool = ALL_LANGS_FULL
 
     target_langs = [
