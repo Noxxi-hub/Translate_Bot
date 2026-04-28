@@ -2,3 +2,4 @@ discord.py
 flask
 google-genai
 pymongo
+langdetect
