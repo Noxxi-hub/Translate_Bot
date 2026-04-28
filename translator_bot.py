@@ -300,16 +300,30 @@ async def translate_all(text: str, target_langs: list) -> dict:
 
         parsed = _json.loads(clean)
         translations = {}
-        max_len = max(len(text) * 6, 500)  # Übersetzung darf max. 6x so lang sein wie Original
+        max_len = max(len(text) * 6, 500)
+
+        # Wörter des Originals für Ähnlichkeitsprüfung
+        original_words = set(re.sub(r'[^\w\s]', '', text.lower()).split())
 
         for code in codes:
             val = parsed.get(code, "").strip()
             if not val:
                 continue
+
+            # Exakte Kopie
             if val.lower() == text.lower():
+                log.warning(f"Übersetzung identisch mit Original ({code}) — verworfen")
                 continue
 
-            # Loop-Erkennung: wenn ein einzelnes Wort/Zeichen > 15x wiederholt wird → Müll
+            # Ähnlichkeitsprüfung: wenn >70% der Wörter identisch mit Original → nicht übersetzt
+            if len(original_words) >= 3:
+                val_words = set(re.sub(r'[^\w\s]', '', val.lower()).split())
+                overlap = len(original_words & val_words) / len(original_words)
+                if overlap > 0.70:
+                    log.warning(f"Übersetzung zu ähnlich zum Original ({code}): {overlap:.0%} Übereinstimmung — verworfen")
+                    continue
+
+            # Loop-Erkennung: wenn ein einzelnes Wort > 15x wiederholt → Müll
             words = val.split()
             if words:
                 most_common = max(set(words), key=words.count)
@@ -317,7 +331,7 @@ async def translate_all(text: str, target_langs: list) -> dict:
                     log.warning(f"Loop-Übersetzung erkannt ({code}): '{most_common}' x{words.count(most_common)} — verworfen")
                     continue
 
-            # Längen-Check: verhindert endlose Ausgaben
+            # Längen-Check
             if len(val) > max_len:
                 log.warning(f"Übersetzung zu lang ({code}): {len(val)} Zeichen — abgeschnitten")
                 val = val[:max_len]
