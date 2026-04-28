@@ -258,9 +258,10 @@ async def translate_all(text: str, target_langs: list) -> dict:
     if not target_langs:
         return {}
 
-    codes_str  = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
-    format_str = "\n".join(f"{code}: ..." for code, _, _ in target_langs)
-    estimated  = max(1500, min(6000, int(len(text) * 1.5 * len(target_langs))))
+    codes     = [code for code, _, _ in target_langs]
+    codes_str = ", ".join(f"{code}={lang_name}" for code, lang_name, _ in target_langs)
+    json_keys = ", ".join(f'"{code}": "..."' for code in codes)
+    estimated = max(800, min(4000, int(len(text) * 2.5 * len(target_langs))))
 
     try:
         result = await gemini_call(
@@ -271,39 +272,58 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a precise translator for a mobile strategy game community (alliance chat).\n"
-                        f"Context: Players discuss war coordination, attacks, building upgrades, events, and alliance management.\n"
-                        f"Common terms to keep untranslated: R1/R2/R3/R4/R5 (rank titles), coordinates like R1 X:123 Y:456, server numbers, player names.\n\n"
-                        f"Translate the text into these languages: {codes_str}.\n"
-                        f"Rules:\n"
-                        f"- Translate naturally and colloquially, like a real player would write\n"
-                        f"- Keep game-specific terms, names, coordinates, and numbers as-is\n"
-                        f"- If a word is unclear, choose the most natural game-chat interpretation\n"
-                        f"- Do NOT add explanations, notes, or markdown\n"
-                        f"- Reply ONLY in this exact format, nothing else:\n"
-                        f"{format_str}"
+                        f"You are a gaming community translator for 'Mecha Fire', a mobile strategy game.\n"
+                        f"Players discuss: war attacks, troop coordination, building upgrades, alliance events, diplomacy.\n"
+                        f"NEVER translate these: R1 R2 R3 R4 R5 (player ranks), coordinates (X:123 Y:456), server IDs, player names, alliance names, @mentions.\n\n"
+                        f"Translate the following text into these {len(codes)} languages: {codes_str}.\n\n"
+                        f"CRITICAL RULES:\n"
+                        f"- Write like a real gamer texting — casual, short, natural\n"
+                        f"- Preserve the original tone (urgent, friendly, joking, etc.)\n"
+                        f"- Do NOT translate proper nouns, abbreviations, or game UI terms\n"
+                        f"- Do NOT add any text outside the JSON\n"
+                        f"- Output ONLY this JSON, keys exactly as shown:\n"
+                        f"{{{json_keys}}}"
                     )
                 },
                 {"role": "user", "content": text}
             ]
         )
 
-        codes = [code for code, _, _ in target_langs]
-        translations = {}
-        for i, code in enumerate(codes):
-            if i + 1 < len(codes):
-                next_code = codes[i + 1]
-                m = re.search(
-                    rf"^{code}:\s*(.+?)(?=^{next_code}:)",
-                    result, re.MULTILINE | re.DOTALL
-                )
-            else:
-                m = re.search(rf"^{code}:\s*(.+)", result, re.MULTILINE | re.DOTALL)
+        # JSON parsen
+        import json as _json
+        clean = result.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        clean = clean.strip()
 
-            if m:
-                translation = m.group(1).strip()
-                if translation and translation.lower() != text.lower():
-                    translations[code] = translation
+        parsed = _json.loads(clean)
+        translations = {}
+        max_len = max(len(text) * 6, 500)  # Übersetzung darf max. 6x so lang sein wie Original
+
+        for code in codes:
+            val = parsed.get(code, "").strip()
+            if not val:
+                continue
+            if val.lower() == text.lower():
+                continue
+
+            # Loop-Erkennung: wenn ein einzelnes Wort/Zeichen > 15x wiederholt wird → Müll
+            words = val.split()
+            if words:
+                most_common = max(set(words), key=words.count)
+                if words.count(most_common) > 15:
+                    log.warning(f"Loop-Übersetzung erkannt ({code}): '{most_common}' x{words.count(most_common)} — verworfen")
+                    continue
+
+            # Längen-Check: verhindert endlose Ausgaben
+            if len(val) > max_len:
+                log.warning(f"Übersetzung zu lang ({code}): {len(val)} Zeichen — abgeschnitten")
+                val = val[:max_len]
+
+            translations[code] = val
+
         return translations
 
     except Exception as e:
