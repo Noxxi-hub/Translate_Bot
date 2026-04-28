@@ -266,28 +266,16 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a professional translator. Your only job is to translate text accurately.
-"
-                        f"The text comes from a Discord chat of a mobile game alliance (Mecha Fire).
-
-"
-                        f"Translate the text into these {len(codes)} languages: {codes_str}.
-
-"
-                        f"STRICT RULES — follow exactly:
-"
-                        f"1. Translate the MEANING faithfully — do not paraphrase, summarize, or change the message
-"
-                        f"2. Keep the same tone: if the original is funny, keep it funny; if serious, keep it serious
-"
-                        f"3. Keep these UNTRANSLATED: R1 R2 R3 R4 R5, coordinates (X:123 Y:456), server numbers, player names, @mentions, alliance names
-"
-                        f"4. Emojis stay as-is
-"
-                        f"5. Do NOT add explanations, notes, or extra text
-"
-                        f"6. Output ONLY valid JSON with these exact keys:
-"
+                        f"You are a professional translator. Your only job is to translate text accurately.\n"
+                        f"The text comes from a Discord chat of a mobile game alliance (Mecha Fire).\n\n"
+                        f"Translate the text into these {len(codes)} languages: {codes_str}.\n\n"
+                        f"STRICT RULES — follow exactly:\n"
+                        f"1. Translate the MEANING faithfully — do not paraphrase, summarize, or change the message\n"
+                        f"2. Keep the same tone: if the original is funny, keep it funny; if serious, keep it serious\n"
+                        f"3. Keep these UNTRANSLATED: R1 R2 R3 R4 R5, coordinates (X:123 Y:456), server numbers, player names, @mentions, alliance names\n"
+                        f"4. Emojis stay as-is\n"
+                        f"5. Do NOT add explanations, notes, or extra text\n"
+                        f"6. Output ONLY valid JSON with these exact keys:\n"
                         f"{{{json_keys}}}"
                     )
                 },
@@ -419,15 +407,11 @@ async def on_ready():
         channel = bot.get_channel(BOT_LOG_CHANNEL_ID)
         if channel:
             if errors:
-                msg = "⚠️ **Übersetzer-Bot gestartet mit Fehlern:**
-" + "
-".join(errors)
+                msg = "⚠️ **Übersetzer-Bot gestartet mit Fehlern:**\n" + "\n".join(errors)
             else:
                 msg = (
-                    "✅ **Übersetzer-Bot erfolgreich gestartet!**
-"
-                    "🔧 tsprachen.py • geladen
-"
+                    "✅ **Übersetzer-Bot erfolgreich gestartet!**\n"
+                    "🔧 tsprachen.py • geladen\n"
                     "⚡ Optimiert: Lokale Spracherkennung, AFC deaktiviert, Cache aktiv"
                 )
             await channel.send(msg)
@@ -465,8 +449,7 @@ async def cmd_translate(ctx, action: str = None):
         await ctx.send("🔴 Übersetzer-Bot **deaktiviert**.")
     elif action == "status":
         status = "✅ Aktiv" if translate_active else "🔴 Inaktiv"
-        await ctx.send(f"**Übersetzer-Bot Status:** {status}
-**Sprachen:** {', '.join(sorted(get_active_languages()))}")
+        await ctx.send(f"**Übersetzer-Bot Status:** {status}\n**Sprachen:** {', '.join(sorted(get_active_languages()))}")
     else:
         await ctx.send("❓ Unbekannte Option.")
 
