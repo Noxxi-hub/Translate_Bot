@@ -69,7 +69,7 @@ import concurrent.futures as _futures
 _gemini_executor = _futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="gemini_t")
 
 user_last_translation: dict[int, float] = {}
-TRANSLATION_COOLDOWN = 8.0
+TRANSLATION_COOLDOWN = 2.0  # reduziert von 8.0 für Gemini (höheres Rate-Limit)
 
 token_counter = {"prompt": 0, "completion": 0, "total": 0}
 
@@ -202,6 +202,10 @@ async def detect_language_llm(text: str) -> str:
         return "OTHER"
     if re.match(r"^[\d\s\W]+$", stripped):
         return "OTHER"
+
+    # FIX: kurze deutsche Standardphrasen forcieren (für "Ja frag" etc.)
+    if stripped.lower() in {"ja", "nein", "ja frag", "frag", "okay", "ok", "danke", "bitte", "klar", "genau", "jo", "ne"}:
+        return "DE"
 
     script_lang = _script_detect(stripped)
     if script_lang:
@@ -502,11 +506,13 @@ async def on_message(message: discord.Message):
 
     now = time.time()
     if now - user_last_translation.get(message.author.id, 0) < TRANSLATION_COOLDOWN:
+        log.info(f"SKIP cooldown [{message.channel.name}] user:{message.author.display_name} ({now - user_last_translation.get(message.author.id, 0):.1f}s < {TRANSLATION_COOLDOWN}s)")
         return
     user_last_translation[message.author.id] = now
 
     lang = await detect_language_llm(content)
     if lang == "OTHER":
+        log.info(f"SKIP OTHER [{message.channel.name}] '{content[:30]}'")
         return
 
     FORUM_CHANNEL_ID = 1478065008960077866
