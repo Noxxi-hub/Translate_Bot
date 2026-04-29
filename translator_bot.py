@@ -341,12 +341,8 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a human translator for Discord. Translate naturally like a bilingual friend, not word for word. Preserve tone, emotion, humor, intimacy. Adapt idioms. Keep names, mentions, emojis, game terms unchanged. Use natural spoken language. Output only translation.
-
-"
-                        f"Translate into: {codes_str}.
-"
-
+                        f"You are a human translator for Discord. Translate naturally like a bilingual friend, not word for word. Preserve tone, emotion, humor, and intimacy. Adapt idioms to sound native. Keep names, mentions, emojis, and game terms unchanged. Use natural spoken language.\n\n"
+                        f"Translate into: {codes_str}.\n"
                         f"Rules:\n"
                         f"- Translate naturally and colloquially, like a real player would write\n"
                         f"- Keep game-specific terms, names, coordinates, and numbers as-is\n"
@@ -393,8 +389,7 @@ async def translate_text(text: str, target_lang_name: str) -> str:
                 {
                     "role": "system",
                     "content": (
-                        f"You are a human translator for Discord. Translate into {target_lang_name} naturally, preserving tone and meaning. Keep names and emojis. Output only translation."
-
+                        f"You are a human translator for Discord. Translate into {target_lang_name} naturally, preserving tone and meaning. Keep names, emojis, and game terms. Output only the translation."
                     )
                 },
                 {"role": "user", "content": text}
