@@ -45,7 +45,6 @@ LOGO_URL = (
 
 GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
-    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash",
     "gemini-3-flash-preview",
 ]
@@ -207,7 +206,7 @@ def _script_detect(text: str) -> str | None:
 
 
 async def detect_language_llm(text: str) -> str:
-    """Erkennt Sprache LOKAL — 0 API-Calls."""
+    """Erkennt Sprache LOKAL — 0 API-Calls, optimiert für kurze DE/FR."""
     stripped = text.strip()
 
     if not stripped or len(stripped) < 2:
@@ -218,10 +217,7 @@ async def detect_language_llm(text: str) -> str:
     if re.match(r"^[\d\s\W]+$", stripped):
         return "OTHER"
 
-    # FIX: kurze deutsche Standardphrasen forcieren (für "Ja frag" etc.)
-    if stripped.lower() in {"ja", "nein", "ja frag", "frag", "okay", "ok", "danke", "bitte", "klar", "genau", "jo", "ne"}:
-        return "DE"
-
+    # Script-Erkennung zuerst
     script_lang = _script_detect(stripped)
     if script_lang:
         return script_lang
@@ -230,21 +226,50 @@ async def detect_language_llm(text: str) -> str:
     if key in lang_cache:
         return lang_cache[key]
 
+    t = f" {stripped.lower()} "
+
+    # NEU: kurze Texte (<20 Zeichen) – harte Heuristik
+    if len(stripped) < 20:
+        de_markers = [' ich ', ' bin ', ' da ', ' ne ', ' ja ', ' nein ', ' was ', ' du ', ' nicht ', ' mal ', ' hab ', ' habe ', ' ist ', ' ein ', ' der ', ' die ', ' das ', ' und ', ' ne bin ', ' was sagst ']
+        fr_markers = [' je ', ' suis ', ' pas ', ' oui ', ' non ', ' tu ', ' vous ', ' est ', ' le ', ' la ', ' et ', ' pour ', ' quoi ']
+        de_hits = sum(1 for w in de_markers if w in t)
+        fr_hits = sum(1 for w in fr_markers if w in t)
+        if de_hits > 0 and de_hits >= fr_hits:
+            lang_cache[key] = "DE"
+            return "DE"
+        if fr_hits > 0 and fr_hits > de_hits:
+            lang_cache[key] = "FR"
+            return "FR"
+        if any(c in stripped for c in 'äöüßÄÖÜ'):
+            lang_cache[key] = "DE"
+            return "DE"
+
     lang = "OTHER"
     if LANGDETECT_AVAILABLE:
         try:
             langs = detect_langs(stripped)
             code = langs[0].lang.upper()
+            prob = langs[0].prob
             mapping = {"PT": "PT", "EN": "EN", "DE": "DE", "FR": "FR", "ES": "ES", "RU": "RU", "JA": "JA", "ZH-CN": "ZH", "ZH": "ZH", "KO": "KO"}
-            lang = mapping.get(code, "OTHER")
+            if prob > 0.7:
+                lang = mapping.get(code, "OTHER")
         except:
             lang = "OTHER"
     else:
-        # Fallback: einfache Heuristik
-        if re.search(r'(der|die|das|und|ich|nicht)', stripped.lower()): lang = "DE"
-        elif re.search(r'(the|and|you|for)', stripped.lower()): lang = "EN"
-        elif re.search(r'(le|la|et|vous|pour)', stripped.lower()): lang = "FR"
-        elif re.search(r'(o|a|e|que|para)', stripped.lower()): lang = "PT"
+        if re.search(r'\b(der|die|das|und|ich|nicht)\b', stripped.lower()): lang = "DE"
+        elif re.search(r'\b(the|and|you|for)\b', stripped.lower()): lang = "EN"
+        elif re.search(r'\b(le|la|et|vous|pour)\b', stripped.lower()): lang = "FR"
+        elif re.search(r'\b(o|a|e|que|para)\b', stripped.lower()): lang = "PT"
+
+    if lang == "OTHER":
+        if any(w in t for w in [' der ', ' die ', ' das ', ' und ', ' ich ', ' nicht ']):
+            lang = "DE"
+        elif any(w in t for w in [' le ', ' la ', ' et ', ' vous ', ' je ']):
+            lang = "FR"
+        elif any(w in t for w in [' the ', ' and ', ' you ']):
+            lang = "EN"
+        else:
+            lang = "EN"
 
     known = {"DE","FR","PT","EN","ES","RU","JA","ZH","KO","OTHER"}
     if lang not in known:
