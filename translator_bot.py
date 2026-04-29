@@ -567,6 +567,16 @@ async def on_message(message: discord.Message):
         embed.set_footer(text="VHA Übersetzer", icon_url=LOGO_URL)
         return embed
 
+    # ── PERFORMANCE LOGGING START ──
+    import time as _time
+    perf_start = _time.perf_counter()
+    discord_delay_ms = int((_time.time() - message.created_at.timestamp()) * 1000)
+    
+    # Cache-Key vorhersagen (wie in translate_all)
+    codes = [c for c, _, _ in target_langs]
+    cache_key = f"{content[:200]}_{'_'.join(codes)}"
+    cache_hit = cache_key in translation_cache
+
     try:
         translations = await translate_all(content, target_langs)
         fields = []
@@ -578,8 +588,20 @@ async def on_message(message: discord.Message):
         if fields:
             await message.reply(embed=make_embed(fields), mention_author=False)
 
+        total_ms = int((_time.perf_counter() - perf_start) * 1000)
+        
+        # Log mit allen Details
+        log.info(
+            f"PERF [{message.guild.name if message.guild else 'DM'}] "
+            f"#{message.channel.name} | user:{message.author.display_name} | "
+            f"lang:{lang}->{','.join(codes)} | "
+            f"discord:{discord_delay_ms}ms | cache:{'HIT' if cache_hit else 'MISS'} | "
+            f"total:{total_ms}ms | len:{len(content)}"
+        )
+
     except Exception as e:
-        log.error(f"Übersetzungsfehler: {type(e).__name__} - {str(e)}")
+        total_ms = int((_time.perf_counter() - perf_start) * 1000)
+        log.error(f"Übersetzungsfehler nach {total_ms}ms: {type(e).__name__} - {str(e)}")
         try:
             await message.add_reaction("⚠️")
         except Exception:
