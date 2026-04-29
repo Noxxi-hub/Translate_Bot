@@ -44,8 +44,8 @@ LOGO_URL = (
 )
 
 GEMINI_MODELS = [
-    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-3-flash-preview",
 ]
 GEMINI_MODEL = GEMINI_MODELS[0]
@@ -69,7 +69,7 @@ translate_active = True
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY_TRANSLATOR"))
 
 # Semaphore: max. 4 gleichzeitige Gemini-Calls
-gemini_semaphore = asyncio.Semaphore(4)
+gemini_semaphore = asyncio.Semaphore(8)
 
 import concurrent.futures as _futures
 _gemini_executor = _futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="gemini_t")
