@@ -1,222 +1,158 @@
-# 🌐 VHA Übersetzer-Bot — Mecha Fire
+# 🌐 VHA Übersetzer-Bot — README
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
-[![discord.py](https://img.shields.io/badge/discord.py-latest-5865F2)](https://discordpy.readthedocs.io)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248)](https://mongodb.com/atlas)
-[![Hosted on](https://img.shields.io/badge/Hosted-Render-46E3B7)](https://render.com)
-
-Zweiter Bot im VHA-System — zuständig für **PT, EN und alle weiteren Sprachen**.  
-Arbeitet parallel zum Haupt-Bot (`app.py`), der DE + FR übernimmt.  
-Gleiche Infrastruktur · Eigener API-Key · Eigener Discord-Token
+**Version:** Gemini 2.5 Flash  
+**Hosting:** Render (Free Tier) + UptimeRobot Keep-Alive  
+**Sprache:** Python 3.11+
 
 ---
 
-## 📁 Projektstruktur
+## 📋 Übersicht
+
+Der VHA Übersetzer-Bot ist der sekundäre Übersetzungsbot für die VHA Alliance Discord-Server. Er ergänzt den Haupt-Bot um zusätzliche Sprachen (JA, ZH, KO, ES, RU) und kann optional auch DE und FR pro Raum aktiviert bekommen. Beide Bots arbeiten parallel — jeder mit eigenem Gemini API-Key für maximale Performance.
+
+---
+
+## ⚙️ Technologie-Stack
+
+| Komponente | Details |
+|---|---|
+| **KI-Modell** | Google Gemini 2.5 Flash (primär) |
+| **Fallback** | Gemini 2.5 Flash Lite |
+| **Datenbank** | MongoDB Atlas (`vhabot`) |
+| **Web-Server** | Flask (Keep-Alive für Render) |
+| **Discord-Library** | discord.py |
+| **Hosting** | Render Free Tier |
+
+---
+
+## 🌍 Übersetzung
+
+### Feste Sprachen (immer aktiv)
+- 🇧🇷 Português
+- 🇬🇧 English
+
+### Zuschaltbare Sprachen (global via `!sprachen`)
+- 🇯🇵 日本語
+- 🇨🇳 中文
+- 🇰🇷 한국어
+- 🇪🇸 Español
+- 🇷🇺 Русский
+
+### Zusätzlich via `!traumsprachen` pro Raum
+- 🇩🇪 Deutsch
+- 🇫🇷 Français
+- (+ alle globalen Sprachen)
+
+### Übersetzungsregeln
+- Immer **Du-Form** — niemals "Sie" oder "Vous"
+- Kosenamen werden korrekt übersetzt (süße → chérie/honey, schatz → chéri/darling)
+- Spielerbegriffe werden **nie** übersetzt: R1–R5, Koordinaten, Spielernamen, @mentions
+- Emojis bleiben unverändert
+- Natürliche, menschliche Übersetzung — kein wörtliches Wort-für-Wort
+
+### Qualitätssicherung
+Der Bot prüft jede Übersetzung automatisch auf:
+- Identische Texte (nicht übersetzt) → verworfen
+- Falsche Sprache im Feld → verworfen
+- Wiederholungs-Loops (>15x dasselbe Wort) → verworfen
+- Zu lange Ausgaben (>6x Originallänge) → abgeschnitten
+- Zu ähnlich zum Original (>70% Wortüberschneidung bei 4+ Wörtern) → verworfen
+
+---
+
+## 📁 Dateistruktur
 
 ```
-├── translator_bot.py    # Bot-Einstiegspunkt, Groq-Wrapper, Auto-Translation, Flask-Keepalive
-├── tsprachen.py         # Globale Sprachen + Raumsprachen per Button-UI (Cog)
-├── requirements.txt     # Python-Abhängigkeiten
+translator_bot.py   — Hauptdatei: Bot-Logik, Gemini-Calls, on_message
+tsprachen.py        — Globale + Raumspracheinstellungen (MongoDB)
+requirements.txt    — Python-Abhängigkeiten
 ```
 
 ---
 
-## 🔀 Aufgabenteilung im VHA-System
-
-Der VHA-Server läuft mit **zwei Bots gleichzeitig**:
-
-| Bot | Datei | Feste Sprachen | Zuschaltbar |
-|---|---|---|---|
-| **Haupt-Bot** | `app.py` | 🇩🇪 DE · 🇫🇷 FR | PT, EN, JA, ZH, KO, … |
-| **Übersetzer-Bot** | `translator_bot.py` | 🇧🇷 PT · 🇬🇧 EN | JA, ZH, KO, ES, IT, RU, AR, TR, PL, NL |
-
-Nachrichten auf DE oder FR werden **nicht** vom Übersetzer-Bot verarbeitet — der Haupt-Bot übernimmt diese.  
-Nachrichten auf PT oder EN werden **nicht** vom Haupt-Bot verarbeitet — der Übersetzer-Bot übernimmt diese.  
-So werden Doppelübersetzungen und gegenseitige Übersetzung von Bot-Nachrichten verhindert.
-
----
-
-## ⚙️ Setup & Deployment
-
-### Umgebungsvariablen
+## 🔑 Umgebungsvariablen (Render)
 
 | Variable | Beschreibung |
 |---|---|
-| `DISCORD_TOKEN_TRANSLATOR` | Discord Bot Token (eigener Bot, **nicht** der Haupt-Bot) |
-| `GROQ_API_KEY_TRANSLATOR` | Groq API Key (eigener Key für Rate-Limit-Trennung) |
-| `MONGODB_URI` | MongoDB Atlas Connection String (gleiche DB wie Haupt-Bot) |
-| `PORT` | Server-Port (Standard: `10000`, von Render gesetzt) |
+| `DISCORD_TOKEN_TRANSLATOR` | Discord Bot Token (eigener Bot!) |
+| `GEMINI_API_KEY_TRANSLATOR` | Google AI Studio API Key (eigener Key!) |
+| `MONGODB_URI` | MongoDB Atlas Connection String (geteilt mit Haupt-Bot) |
 
-> ⚠️ Der Bot verwendet **eigene Env-Variablen** (`DISCORD_TOKEN_TRANSLATOR`, `GROQ_API_KEY_TRANSLATOR`), damit Haupt-Bot und Übersetzer-Bot unabhängige Rate-Limits haben.
-
-### Lokale Installation
-
-```bash
-pip install -r requirements.txt
-python translator_bot.py
-```
-
-### Deployment auf Render
-
-1. Repository auf GitHub pushen
-2. Neuen **Web Service** auf [render.com](https://render.com) erstellen
-3. Build Command: `pip install -r requirements.txt`
-4. Start Command: `python translator_bot.py`
-5. Umgebungsvariablen in den Render-Settings setzen
-6. Der eingebaute Flask-Server (`/ping`) hält den Bot am Leben
-
-### Requirements
-
-```
-discord.py
-groq
-flask
-pymongo
-dnspython
-```
+> **Wichtig:** Jeder Bot hat einen **eigenen** Gemini API-Key damit sie sich nicht gegenseitig das Rate-Limit teilen.
 
 ---
 
-## 🌐 Auto-Translation
+## 💬 Befehle
 
-Der Bot übersetzt Nachrichten automatisch in alle aktivierten Sprachen (PT + EN immer, weitere optional).
+### 🌐 Übersetzung
+| Befehl | Beschreibung | Berechtigung |
+|---|---|---|
+| `!sprachen` | Globale Zielsprachen ein/ausschalten | R5, R4, DEV |
+| `!traumsprachen [Kanal-ID]` | Sprachen für einen bestimmten Raum einstellen | R5, DEV |
+| `!translate [Text]` | Text manuell übersetzen | Manage Messages |
 
-**Funktionsweise:**
-- Sprache wird zuerst regelbasiert per Unicode-Block erkannt (kein API-Call)
-- Nur für lateinische Schriften wird ein LLaMA-Call ausgelöst
-- Nachrichten unter 2 Zeichen, neutrale Wörter (`ok`, `lol`, `gg`…) und reine Links werden übersprungen
-- GIFs, YouTube-Links und Sticker werden ignoriert
-- Bot-Nachrichten werden grundsätzlich ignoriert (verhindert Übersetzungs-Loops)
-- Pro User gilt ein Cooldown von **8 Sekunden**
-- Max. **2 gleichzeitige** Groq-Calls (Semaphore), mit automatischem Retry und Backoff bei Rate-Limits
-- Ein einziger API-Call übersetzt in **alle** Zielsprachen gleichzeitig
-
-**Feste Sprachen (immer aktiv):** 🇧🇷 Português · 🇬🇧 English  
-**Zuschaltbar:** 🇯🇵 日本語 · 🇨🇳 中文 · 🇰🇷 한국어 · 🇪🇸 Español · 🇮🇹 Italiano · 🇷🇺 Русский · 🇸🇦 العربية · 🇹🇷 Türkçe · 🇵🇱 Polski · 🇳🇱 Nederlands
+### 📊 Status
+| Befehl | Beschreibung | Berechtigung |
+|---|---|---|
+| `!ping` | Bot-Status, Latenz und Token-Verbrauch | Alle |
 
 ---
 
-## 📋 Befehle
-
-**Präfix:** `!t`  
-*(Abweichend vom Haupt-Bot `!` — verhindert Befehlskonflikte)*
-
----
-
-### 🌍 Sprachen
-
-#### `!tsprachen`
-*(aliases: `!tlanguages`, `!tidiomas`, `!tlang`)*
-
-Öffnet ein interaktives Button-Menü zur globalen Sprachsteuerung des Übersetzer-Bots.  
-PT + EN sind immer aktiv und können nicht abgeschaltet werden.  
-JA, ZH, KO, ES, IT, RU, AR, TR, PL, NL können per Button ein/ausgeschaltet werden.
-
-Duplikate werden automatisch gelöscht (vorherige `!tsprachen`-Nachricht im Kanal).
-
-**Berechtigung:** Administrator · R5 · R4 · DEV
-
----
-
-#### `!traumsprachen [Kanal-ID]`
-
-Öffnet ein Button-Menü für raum-spezifische Spracheinstellungen des Übersetzer-Bots.  
-Überschreibt die globalen Einstellungen für den jeweiligen Kanal.
-
-```
-!traumsprachen 1234567890123456789
-```
-
-- Alle Sprachen (PT, EN + optional) können pro Kanal individuell ein/ausgeschaltet werden
-- 📡 **Globale Einstellungen** — setzt den Kanal zurück (Eintrag in MongoDB wird gelöscht)
-- 🚫 **Alle aus** — deaktiviert die Übersetzung für diesen Kanal dauerhaft
-
-**Berechtigung:** Administrator · R5 · R4 · DEV
-
-**Tipp:** Mit `!tkanalid` werden alle Kanal-IDs des Servers per DM zugeschickt.
-
----
-
-#### `!tkanalid`
-*(alias: `!tchannelid`)*
-
-Schickt alle Textkanäle mit ihrer ID als Direktnachricht.  
-Hilfreich für den Einsatz mit `!traumsprachen`.
-
-**Berechtigung:** Administrator · R5 · R4 · DEV
-
----
-
-### 🔧 Verwaltung
-
-#### `!tping`
-
-Zeigt den Status des Übersetzer-Bots: Latenz, heutigen Token-Verbrauch und aktive Sprachen.
-
----
-
-#### `!ttranslate [on|off|status]`
-
-Schaltet die Auto-Translation des Bots global ein oder aus.
-
-```
-!ttranslate on      # Aktivieren
-!ttranslate off     # Deaktivieren
-!ttranslate status  # Aktuellen Status anzeigen
-```
-
-**Berechtigung:** `manage_messages`-Berechtigung
-
----
-
-## 🗄️ MongoDB Datenstruktur
-
-**Datenbank:** `vhabot`  
-*(Gleiche Datenbank wie der Haupt-Bot — separate Collections)*
+## 🗄️ MongoDB Collections
 
 | Collection | Inhalt |
 |---|---|
-| `tsprachen` | Globale Spracheinstellungen (`_id: "settings"`, Feld: `active`) |
-| `tsprachen_rooms` | Raum-spezifische Sprachen (`_id: channel_id`, Felder: `langs`, `disabled`) |
-
-> Die Collections `tsprachen` und `tsprachen_rooms` sind vollständig getrennt von `sprachen` und `raumsprachen` des Haupt-Bots. Beide Bots teilen sich nur die MongoDB-Verbindung, nicht die Sprachdaten.
+| `tsprachen` | Globale Spracheinstellungen des Übersetzer-Bots |
+| `tsprachen_rooms` | Raumspezifische Einstellungen |
 
 ---
 
-## 🔐 Rollenberechtigungen
+## 🔄 Zusammenspiel mit dem Haupt-Bot
 
-| Rolle | Berechtigungen |
-|---|---|
-| **Administrator** | Alle Befehle |
-| **R5** | `!tsprachen`, `!traumsprachen`, `!tkanalid` |
-| **R4** | `!tsprachen`, `!traumsprachen`, `!tkanalid` |
-| **DEV** | `!tsprachen`, `!traumsprachen`, `!tkanalid` |
-
----
-
-## 🤖 KI-Modell
-
-| Modell | Verwendung |
-|---|---|
-| `llama-3.3-70b-versatile` | Spracherkennung + Text-Übersetzung |
-
-**Rate-Limit-Handling:**
-- Semaphore (max. 2 gleichzeitige Calls)
-- Globale Pause bei 429 (exponentieller Backoff, max. 60s)
-- Token-Verbrauch wird täglich in `translator_bot.log` geloggt und ist per `!tping` einsehbar
+| | Haupt-Bot | Übersetzer-Bot |
+|---|---|---|
+| **Feste Sprachen** | DE, FR, EN | PT, EN |
+| **Optionale Sprachen** | PT, JA, ZH, KO, ES, RU | JA, ZH, KO, ES, RU |
+| **Per Raum** | via `!raumsprachen` | via `!traumsprachen` (inkl. DE/FR) |
+| **KI-Assistent** | ✅ (`!ai`) | ❌ |
+| **Bildübersetzung** | ✅ (`!übersetze`) | ❌ |
+| **Server-Tools** | ✅ | ❌ |
+| **API-Key** | `GEMINI_API_KEY` | `GEMINI_API_KEY_TRANSLATOR` |
 
 ---
 
-## 🌐 Flask Keep-Alive
+## 🔄 Modell-Fallback
 
-Eingebetteter Flask-Server für Render:
-
-- `GET /` → `"VHA Translator-Bot • Online"`
-- `GET /ping` → `"pong"`
+```
+gemini-2.5-flash          ← primär (beste Qualität)
+    ↓ bei 503/429
+gemini-2.5-flash-lite     ← schneller, leichter
+```
 
 ---
 
-## 📝 Lizenz & Credits
+## 📦 Installation (requirements.txt)
 
-Entwickelt für die **VHA Alliance** (Mecha Fire).  
-Maintainer: **Noxxi-hub**
+```
+discord.py
+flask
+google-genai
+pymongo
+```
+
+---
+
+## 🚀 Deploy auf Render
+
+1. Separates GitHub-Repo für den Übersetzer-Bot
+2. Umgebungsvariablen in Render setzen
+3. Start-Befehl: `python translator_bot.py`
+4. UptimeRobot auf `https://[deine-render-url-translator]/ping` setzen (alle 5 Minuten)
+
+---
+
+## ⚠️ Bekannte Einschränkungen
+
+- Render Free Tier: kann bei Inaktivität schlafen gehen (UptimeRobot verhindert das)
+- Gemini kann bei hoher Last langsamer sein (Google-seitig)
+- Beide Bots teilen dieselbe MongoDB — gleichzeitige Schreibzugriffe sind unproblematisch da verschiedene Collections
