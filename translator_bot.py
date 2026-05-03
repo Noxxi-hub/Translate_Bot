@@ -106,29 +106,39 @@ def _get_dice_col():
 
 def db_update_stats(user_id: int, display_name: str, result: str):
     col = _get_dice_col()
-    inc = {"wins": 0, "losses": 0, "draws": 0, "games": 1}
-    if result == "win":    inc["wins"]   = 1
-    elif result == "loss": inc["losses"] = 1
-    else:                  inc["draws"]  = 1
+    inc = {"wins": 0, "losses": 0, "draws": 0, "games": 1, "points": 0}
+    if result == "win":    inc["wins"]   = 1; inc["points"] = 10
+    elif result == "loss": inc["losses"] = 1; inc["points"] = -5
+    else:                  inc["draws"]  = 1; inc["points"] = 3
     col.find_one_and_update(
         {"user_id": user_id},
-        {"$set": {"name": display_name}, "$inc": inc, "$setOnInsert": {"user_id": user_id}},
+        {"$set": {"name": display_name}, "$inc": inc, "$setOnInsert": {"user_id": user_id, "wins":0, "losses":0, "draws":0, "games":0, "points":0}},
         upsert=True,
         return_document=ReturnDocument.AFTER,
+    )
+
+
+def db_add_points(user_id: int, display_name: str, delta: int):
+    """Fügt Punkte hinzu (kann negativ sein) — für neue Minispiele."""
+    col = _get_dice_col()
+    col.find_one_and_update(
+        {"user_id": user_id},
+        {"$set": {"name": display_name}, "$inc": {"points": delta}, "$setOnInsert": {"user_id": user_id, "wins":0, "losses":0, "draws":0, "games":0, "points":0}},
+        upsert=True,
     )
 
 
 def db_get_ranking(limit: int = 10) -> list:
     col = _get_dice_col()
     return list(col.find(
-        {"games": {"$gt": 0}},
-        {"_id": 0, "user_id": 1, "name": 1, "wins": 1, "losses": 1, "draws": 1, "games": 1}
-    ).sort([("wins", -1), ("games", 1)]).limit(limit))
+        {"$or": [{"games": {"$gt": 0}}, {"points": {"$ne": 0}}]},
+        {"_id": 0, "user_id": 1, "name": 1, "wins": 1, "losses": 1, "draws": 1, "games": 1, "points": 1}
+    ).sort([("points", -1), ("wins", -1), ("games", 1)]).limit(limit))
 
 
 def db_get_player(user_id: int) -> dict | None:
     col = _get_dice_col()
-    return col.find_one({"user_id": user_id}, {"_id": 0})
+    return col.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "name": 1, "wins": 1, "losses": 1, "draws": 1, "games": 1, "points": 1})
 
 
 def get_active_languages() -> set:
