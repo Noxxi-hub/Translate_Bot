@@ -583,117 +583,158 @@ async def cmd_wuerfel(ctx, seiten: int = 6):
     await ctx.send(embed=embed)
 
 
+# _dice_challenges: { channel_id: { "host_id": int, "host_name": str, "players": [...] } }
+
+MAX_DUEL_PLAYERS = 10
+DUEL_TIMER = 60  # Sekunden bis automatische Auswertung
+
+
+async def _resolve_duel(channel, channel_id: int):
+    """Wertet das Duell aus und schickt das Ergebnis-Embed."""
+    if channel_id not in _dice_challenges:
+        return
+    ch = _dice_challenges.pop(channel_id)
+    players = ch["players"]
+
+    if len(players) < 2:
+        await channel.send(
+            "🇩🇪 Duell beendet — zu wenige Spieler.  "
+            "🇫🇷 Duel terminé — pas assez de joueurs.  "
+            "🇬🇧 Duel ended — not enough players.",
+            delete_after=10
+        )
+        return
+
+    players_sorted = sorted(players, key=lambda p: p["roll"], reverse=True)
+    max_roll = players_sorted[0]["roll"]
+    winners  = [p for p in players_sorted if p["roll"] == max_roll]
+    is_draw  = len(winners) > 1
+
+    place_emojis = ["🥇", "🥈", "🥉"] + [f"`{i+1}.`" for i in range(3, MAX_DUEL_PLAYERS)]
+    lines = []
+    last_roll = None
+    place = 0
+    for p in players_sorted:
+        if p["roll"] != last_roll:
+            place += 1
+            last_roll = p["roll"]
+        medal = place_emojis[place - 1] if place - 1 < len(place_emojis) else f"`{place}.`"
+        lines.append(f"{medal} **{p['name']}** — `{p['roll']}`")
+
+    if is_draw:
+        result_de = f"🤝 **Unentschieden!** {' & '.join(w['name'] for w in winners)}"
+        result_fr = f"🤝 **Égalité !** {' & '.join(w['name'] for w in winners)}"
+        result_en = f"🤝 **Draw!** {' & '.join(w['name'] for w in winners)}"
+        color = 0x9B59B6
+    else:
+        w = winners[0]
+        result_de = f"🏆 **{w['name']}** gewinnt!"
+        result_fr = f"🏆 **{w['name']}** gagne !"
+        result_en = f"🏆 **{w['name']}** wins!"
+        color = 0xF1C40F
+
+    try:
+        for p in players:
+            if is_draw and p["roll"] == max_roll:
+                res = "draw"
+            elif p["roll"] == max_roll:
+                res = "win"
+            else:
+                res = "loss"
+            db_update_stats(p["id"], p["name"], res)
+    except Exception as e:
+        log.error(f"DB stats error: {e}")
+
+    embed = discord.Embed(
+        title="🎲 Würfelduell — Ergebnis! / Résultat ! / Result!",
+        description="\n".join(lines),
+        color=color
+    )
+    embed.add_field(
+        name="Ergebnis / Résultat / Result",
+        value=f"🇩🇪 {result_de}\n🇫🇷 {result_fr}\n🇬🇧 {result_en}",
+        inline=False
+    )
+    embed.set_footer(text="VHA Würfelduell / Duel de dés / Dice Duel", icon_url=LOGO_URL)
+    await channel.send(embed=embed)
+
+
 @bot.command(name="duell", aliases=["duel", "duel🎲"])
 async def cmd_duell(ctx):
     """
-    Würfelduell gegen einen anderen Spieler.
-    Erster Spieler tippt !duell → fordert heraus
-    Zweiter Spieler tippt !duell → nimmt an und das Ergebnis wird ermittelt
+    Gruppenduell bis 10 Spieler — automatische Auswertung nach 60 Sekunden.
+    !duell → Duell starten ODER beitreten
     """
     channel_id = ctx.channel.id
-    user_id = ctx.author.id
+    user_id    = ctx.author.id
+    name       = ctx.author.display_name
 
-    # Läuft bereits eine Herausforderung in diesem Kanal?
+    # ── BEITRETEN ──
     if channel_id in _dice_challenges:
-        challenge = _dice_challenges[channel_id]
+        ch = _dice_challenges[channel_id]
 
-        # Derselbe User kann nicht gegen sich selbst spielen
-        if challenge["challenger_id"] == user_id:
+        if any(p["id"] == user_id for p in ch["players"]):
             await ctx.send(
-                f"⏳ Du hast bereits ein Duell gestartet, {ctx.author.display_name}! "
-                "Warte auf einen anderen Spieler.",
-                delete_after=8
+                f"🇩🇪 Du bist bereits dabei, **{name}**!  "
+                f"🇫🇷 Tu es déjà inscrit !  "
+                f"🇬🇧 You already joined!",
+                delete_after=6
             )
             return
 
-        # Herausforderer wird angenommen!
-        del _dice_challenges[channel_id]
+        if len(ch["players"]) >= MAX_DUEL_PLAYERS:
+            await ctx.send(
+                f"🇩🇪 Duell ist voll! (max. {MAX_DUEL_PLAYERS})  "
+                f"🇫🇷 Duel complet !  "
+                f"🇬🇧 Duel is full!",
+                delete_after=6
+            )
+            return
 
-        roll1 = challenge["roll"]
-        roll2 = _random.randint(1, 6)
-
-        challenger_id   = challenge["challenger_id"]
-        challenger_name = challenge["challenger_name"]
-        opponent_id     = ctx.author.id
-        opponent_name   = ctx.author.display_name
-
-        if roll1 > roll2:
-            winner_de = f"🏆 **{challenger_name}** gewinnt!"
-            winner_fr = f"🏆 **{challenger_name}** gagne !"
-            winner_en = f"🏆 **{challenger_name}** wins!"
-            color = 0xF1C40F
-            c_result, o_result = "win", "loss"
-        elif roll2 > roll1:
-            winner_de = f"🏆 **{opponent_name}** gewinnt!"
-            winner_fr = f"🏆 **{opponent_name}** gagne !"
-            winner_en = f"🏆 **{opponent_name}** wins!"
-            color = 0xF1C40F
-            c_result, o_result = "loss", "win"
-        else:
-            winner_de = "🤝 **Unentschieden!** Nochmal würfeln?"
-            winner_fr = "🤝 **Égalité !** Rejouer ?"
-            winner_en = "🤝 **Draw!** Roll again?"
-            color = 0x9B59B6
-            c_result, o_result = "draw", "draw"
-
-        try:
-            db_update_stats(challenger_id, challenger_name, c_result)
-            db_update_stats(opponent_id, opponent_name, o_result)
-        except Exception as e:
-            log.error(f"DB stats error: {e}")
-
-        embed = discord.Embed(title="🎲 Würfelduell — Ergebnis! / Résultat ! / Result!", color=color)
-        embed.add_field(name=challenger_name, value=f"# {roll1}", inline=True)
-        embed.add_field(name="VS", value="⚔️", inline=True)
-        embed.add_field(name=opponent_name, value=f"# {roll2}", inline=True)
-        embed.add_field(
-            name="Ergebnis / Résultat / Result",
-            value=f"🇩🇪 {winner_de}\n🇫🇷 {winner_fr}\n🇬🇧 {winner_en}",
-            inline=False
-        )
-        embed.set_footer(text="VHA Würfelduell / Duel de dés / Dice Duel", icon_url=LOGO_URL)
-        await ctx.send(embed=embed)
-
-    else:
-        # Neue Herausforderung starten
         roll = _random.randint(1, 6)
-        _dice_challenges[channel_id] = {
-            "challenger_id": user_id,
-            "challenger_name": ctx.author.display_name,
-            "roll": roll,
-        }
-
-        embed = discord.Embed(title="🎲 Würfelduell / Duel de dés / Dice Duel", color=0x9B59B6)
-        embed.add_field(
-            name=ctx.author.display_name,
-            value=(
-                f"🇩🇪 **{ctx.author.display_name}** fordert zum Würfelduell heraus! Tippe `!duell` zum Mitspielen!\n"
-                f"🇫🇷 **{ctx.author.display_name}** lance un duel ! Tape `!duell` pour jouer !\n"
-                f"🇬🇧 **{ctx.author.display_name}** challenges you! Type `!duell` to join!\n\n"
-                "🇩🇪 *(Würfel werden erst am Ende aufgedeckt)*\n"
-                "🇫🇷 *(Dés révélés à la fin)*\n"
-                "🇬🇧 *(Dice revealed at the end)*"
-            ),
-            inline=False
+        ch["players"].append({"id": user_id, "name": name, "roll": roll})
+        count = len(ch["players"])
+        await ctx.send(
+            f"✅ **{name}** 🇩🇪 ist beigetreten! ({count}/{MAX_DUEL_PLAYERS})  "
+            f"🇫🇷 a rejoint ! ({count}/{MAX_DUEL_PLAYERS})  "
+            f"🇬🇧 joined! ({count}/{MAX_DUEL_PLAYERS})",
+            delete_after=15
         )
-        embed.set_footer(text="Herausforderung läuft... / Défi en cours... / Challenge running...", icon_url=LOGO_URL)
-        await ctx.send(embed=embed)
+        return
 
-        # Nach 5 Minuten automatisch ablaufen lassen
-        await asyncio.sleep(300)
-        if channel_id in _dice_challenges and _dice_challenges[channel_id]["challenger_id"] == user_id:
-            del _dice_challenges[channel_id]
-            try:
-                await ctx.send(
-                    f"⏰ **{ctx.author.display_name}**: "
-                    f"🇩🇪 Würfelduell abgelaufen — niemand hat angenommen.  "
-                    f"🇫🇷 Duel expiré — personne n\'a accepté.  "
-                    f"🇬🇧 Duel expired — nobody joined.",
-                    delete_after=10
-                )
-            except Exception:
-                pass
+    # ── NEUES DUELL STARTEN ──
+    roll = _random.randint(1, 6)
+    _dice_challenges[channel_id] = {
+        "host_id":   user_id,
+        "host_name": name,
+        "players":   [{"id": user_id, "name": name, "roll": roll}],
+    }
 
+    embed = discord.Embed(title="🎲 Würfelduell / Duel de dés / Dice Duel", color=0x9B59B6)
+    embed.add_field(
+        name=f"👑 {name}",
+        value=(
+            f"🇩🇪 **{name}** startet ein Gruppenduell! (bis {MAX_DUEL_PLAYERS} Spieler)\n"
+            f"🇫🇷 **{name}** lance un duel de groupe ! (jusqu'à {MAX_DUEL_PLAYERS} joueurs)\n"
+            f"🇬🇧 **{name}** starts a group duel! (up to {MAX_DUEL_PLAYERS} players)\n\n"
+            f"🇩🇪 Tippe `!duell` zum Beitreten — Auswertung in **{DUEL_TIMER} Sekunden**!\n"
+            f"🇫🇷 Tape `!duell` pour rejoindre — résultat dans **{DUEL_TIMER} secondes** !\n"
+            f"🇬🇧 Type `!duell` to join — result in **{DUEL_TIMER} seconds**!\n\n"
+            "🇩🇪 *(Würfel werden erst am Ende aufgedeckt)*\n"
+            "🇫🇷 *(Dés révélés à la fin)*\n"
+            "🇬🇧 *(Dice revealed at the end)*"
+        ),
+        inline=False
+    )
+    embed.set_footer(
+        text=f"⏱️ {DUEL_TIMER}s • 1/{MAX_DUEL_PLAYERS} Spieler • Herausforderung läuft... / Défi en cours... / Challenge running...",
+        icon_url=LOGO_URL
+    )
+    await ctx.send(embed=embed)
+
+    # 60 Sekunden warten, dann automatisch auswerten
+    await asyncio.sleep(DUEL_TIMER)
+    await _resolve_duel(ctx.channel, channel_id)
 
 
 # ────────────────────────────────────────────────
