@@ -852,6 +852,7 @@ class BombenView(discord.ui.View):
         super().__init__(timeout=30)
         self.safe     = safe
         self.resolved = False
+        self.message = None
 
     async def _handle(self, interaction: discord.Interaction, color: str):
         if self.resolved:
@@ -922,6 +923,23 @@ class BombenView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        if not self.resolved and self.message:
+            try:
+                await self.message.edit(view=self)
+                embed_timeout = discord.Embed(
+                    title="⏱️ Zeit um! / Time's up! / Temps écoulé !",
+                    description=(
+                        "🇩🇪 Die Zeit ist abgelaufen – niemand hat einen Draht durchtrennt!\n"
+                        "🇫🇷 Le temps est écoulé – personne n'a coupé de fil !\n"
+                        "🇧🇷 O tempo acabou – ninguém cortou um fio!\n"
+                        "🇬🇧 Time's up – nobody cut a wire!"
+                    ),
+                    color=0x95A5A6
+                )
+                embed_timeout.set_footer(text="VHA Bomben-Entschärfer • Zeit abgelaufen", icon_url=LOGO_URL)
+                await self.message.channel.send(embed=embed_timeout)
+            except Exception:
+                pass
 
 
 @bot.command(name="bombe", aliases=["bomb", "bombe💣"])
@@ -946,7 +964,8 @@ async def cmd_bombe(ctx):
         inline=False
     )
     embed.set_footer(text="⏱️ 30s • Jeder kann drücken! • VHA Bomben-Entschärfer", icon_url=LOGO_URL)
-    await ctx.send(embed=embed, view=view)
+    msg = await ctx.send(embed=embed, view=view)
+    view.message = msg
 
 
 # ────────────────────────────────────────────────
@@ -960,6 +979,7 @@ class HotView(discord.ui.View):
         self.current   = current
         self.streak    = streak
         self.points    = points
+        self.message = None
 
     async def _check_user(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -1083,6 +1103,23 @@ class HotView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+                embed_timeout = discord.Embed(
+                    title="⏱️ Zeit um! / Time's up! / Temps écoulé !",
+                    description=(
+                        "🇩🇪 Die Zeit ist abgelaufen – keine Auswahl getroffen!\n"
+                        "🇫🇷 Le temps est écoulé – aucun choix fait !\n"
+                        "🇧🇷 O tempo acabou – nenhuma escolha feita!\n"
+                        "🇬🇧 Time's up – no choice made!"
+                    ),
+                    color=0x95A5A6
+                )
+                embed_timeout.set_footer(text="VHA Höher oder Tiefer • Zeit abgelaufen", icon_url=LOGO_URL)
+                await self.message.channel.send(embed=embed_timeout)
+            except Exception:
+                pass
 
 
 @bot.command(name="hot", aliases=["höher", "highlow", "hochtief"])
@@ -1115,7 +1152,8 @@ async def cmd_hot(ctx):
         text=f"⏱️ 30s • Nur {ctx.author.display_name} kann klicken • VHA Höher oder Tiefer",
         icon_url=LOGO_URL
     )
-    await ctx.send(embed=embed, view=view)
+    msg = await ctx.send(embed=embed, view=view)
+    view.message = msg
 
 
 # ────────────────────────────────────────────────
@@ -1132,6 +1170,7 @@ class RouletteJoinView(discord.ui.View):
     def __init__(self, channel_id: int):
         super().__init__(timeout=ROULETTE_TIMER)
         self.channel_id = channel_id
+        self.message = None
 
     @discord.ui.button(
         label="🔫 Beitreten / Rejoindre / Join / Entrar",
@@ -1164,6 +1203,11 @@ class RouletteJoinView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
 
 
 @bot.command(name="roulette", aliases=["russisch", "russischeroulette"])
@@ -1209,6 +1253,7 @@ async def cmd_roulette(ctx):
     )
     embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s zum Beitreten • VHA Russisches Roulette", icon_url=LOGO_URL)
     msg = await ctx.send(embed=embed, view=view)
+    view.message = msg
 
     await asyncio.sleep(ROULETTE_TIMER)
 
