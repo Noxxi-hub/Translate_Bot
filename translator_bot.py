@@ -532,12 +532,12 @@ async def cmd_wuerfel(ctx, seiten: int = 6):
         de, fr, en = "💀 Kritischer Misserfolg!", "💀 Échec critique!", "💀 Critical failure!"
         color = 0xE74C3C
 
-    dice_line = f"# {big_dice} {result} {big_dice}" if big_dice else f"# {result}"
-    embed = discord.Embed(title=f"{face} W{seiten}-Wurf / Lancer W{seiten} / W{seiten} Roll", color=color)
-    embed.add_field(name=f"🎲 {ctx.author.display_name}", value=dice_line, inline=False)
-    embed.add_field(name="🇩🇪", value=de, inline=True)
-    embed.add_field(name="🇫🇷", value=fr, inline=True)
-    embed.add_field(name="🇬🇧", value=en, inline=True)
+    embed = discord.Embed(
+        title=f"W{seiten}-Wurf",
+        description=f"# {result}",
+        color=color
+    )
+    embed.add_field(name=ctx.author.display_name, value=f"🇩🇪 {de}  🇫🇷 {fr}  🇬🇧 {en}", inline=False)
     embed.set_footer(text=f"1–{seiten} möglich / possible", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
