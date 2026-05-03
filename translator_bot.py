@@ -286,7 +286,7 @@ async def detect_language_llm(text: str) -> str:
 # ÜBERSETZEN - MIT CACHE
 # ────────────────────────────────────────────────
 
-async def translate_all(text: str, target_langs: list) -> dict:
+async def translate_all(text: str, target_langs: list, author_id: int = None) -> dict:
     if not target_langs:
         return {}
 
@@ -302,6 +302,17 @@ async def translate_all(text: str, target_langs: list) -> dict:
     estimated = max(800, min(4000, int(len(text) * 2.5 * len(target_langs))))
 
     try:
+        # Gender-Kontext für bessere Grammatik
+        gender_hint = ""
+        if author_id:
+            try:
+                from user_profiles import get_gender_context
+                ctx_hint = get_gender_context(author_id)
+                if ctx_hint:
+                    gender_hint = f"\nGENDER CONTEXT: {ctx_hint}"
+            except Exception:
+                pass
+
         result = await gemini_call(
             model=GEMINI_MODEL,
             temperature=0.1,
@@ -310,13 +321,13 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.\n"
+                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.{gender_hint}\n"
                         f"WICHTIGSTE REGELN:\n"
                         f"1. Verwende IMMER die Du-Form — niemals 'Sie' (Deutsch) oder 'Vous' (Französisch), immer 'Tu'.\n"
                         f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
                         f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
                         f"4. Kosenamen korrekt übersetzen: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
-                        f"4b. Diese Kosenamen NIEMALS übersetzen, immer so lassen: baby, babe, bby, amor, mon amour, chéri, chérie — die werden in allen Sprachen verstanden\n"
+                        f"4b. Nur diese Kosenamen NIEMALS übersetzen: baby, babe, bby — diese bleiben in allen Sprachen unverändert\n"
                         f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
                         f"6. Emojis bleiben exakt unverändert\n"
                         f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
@@ -627,7 +638,7 @@ async def on_message(message: discord.Message):
     cache_hit = cache_key in translation_cache
 
     try:
-        translations = await translate_all(content, target_langs)
+        translations = await translate_all(content, target_langs, author_id=message.author.id)
         fields = []
         for code, _, label in target_langs:
             translation = translations.get(code, "")
