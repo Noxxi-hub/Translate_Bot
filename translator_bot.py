@@ -110,21 +110,30 @@ def db_update_stats(user_id: int, display_name: str, result: str):
     if result == "win":    inc["wins"]   = 1; inc["points"] = 10
     elif result == "loss": inc["losses"] = 1; inc["points"] = -5
     else:                  inc["draws"]  = 1; inc["points"] = 3
-    col.find_one_and_update(
+    # Erst Dokument anlegen (kein Konflikt mit points), dann updaten
+    col.update_one(
         {"user_id": user_id},
-        {"$set": {"name": display_name}, "$inc": inc, "$setOnInsert": {"user_id": user_id, "wins":0, "losses":0, "draws":0, "games":0, "points":0}},
+        {"$setOnInsert": {"user_id": user_id, "wins": 0, "losses": 0, "draws": 0, "games": 0, "points": 0}},
         upsert=True,
-        return_document=ReturnDocument.AFTER,
+    )
+    col.update_one(
+        {"user_id": user_id},
+        {"$set": {"name": display_name}, "$inc": inc},
     )
 
 
 def db_add_points(user_id: int, display_name: str, delta: int):
-    """Fügt Punkte hinzu (kann negativ sein) — für neue Minispiele."""
+    """Fuegt Punkte hinzu (kann negativ sein) — fuer neue Minispiele."""
     col = _get_dice_col()
-    col.find_one_and_update(
+    # Erst Dokument anlegen (kein Konflikt mit points), dann updaten
+    col.update_one(
         {"user_id": user_id},
-        {"$set": {"name": display_name}, "$inc": {"points": delta}, "$setOnInsert": {"user_id": user_id, "wins":0, "losses":0, "draws":0, "games":0, "points":0}},
+        {"$setOnInsert": {"user_id": user_id, "wins": 0, "losses": 0, "draws": 0, "games": 0, "points": 0}},
         upsert=True,
+    )
+    col.update_one(
+        {"user_id": user_id},
+        {"$set": {"name": display_name}, "$inc": {"points": delta}},
     )
 
 
