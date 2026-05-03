@@ -422,7 +422,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(
-    command_prefix="!t",
+    command_prefix=["!t", "!"],
     intents=intents,
     help_command=None,
     case_insensitive=True
@@ -686,9 +686,9 @@ async def on_message(message: discord.Message):
     processed_messages.append(message.id)
     processed_messages_set.add(message.id)
 
-    # Befehle (!...) niemals übersetzen — sofort und direkt skippen
+    # Befehle (!t... und !...) niemals übersetzen
     msg_stripped = message.content.strip()
-    if msg_stripped and msg_stripped[0] == "!":
+    if msg_stripped and msg_stripped.startswith("!"):
         await bot.process_commands(message)
         return
 
