@@ -84,50 +84,41 @@ token_counter = {"prompt": 0, "completion": 0, "total": 0}
 lang_cache: dict[str, str] = {}
 translation_cache: dict[str, dict] = {}
 
+
 # ────────────────────────────────────────────────
-# MONGODB — WÜRFEL-STATISTIKEN
+# MONGODB — WÜRFEL-STATISTIKEN (DB: vhabot)
 # ────────────────────────────────────────────────
 
-_mongo_client = None
-_dice_col = None
+_dice_mongo_client = None
+_dice_col_cache = None
 
 def _get_dice_col():
-    global _mongo_client, _dice_col
-    if _dice_col is None:
+    global _dice_mongo_client, _dice_col_cache
+    if _dice_col_cache is None:
         uri = os.getenv("MONGODB_URI")
         if not uri:
             raise RuntimeError("MONGODB_URI fehlt!")
-        _mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        db = _mongo_client.get_default_database()
-        _dice_col = db["dice_stats"]
-        _dice_col.create_index("user_id", unique=True)
-    return _dice_col
+        _dice_mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        _dice_col_cache = _dice_mongo_client["vhabot"]["dice_stats"]
+        _dice_col_cache.create_index("user_id", unique=True)
+    return _dice_col_cache
 
 
 def db_update_stats(user_id: int, display_name: str, result: str):
-    """result: 'win' | 'loss' | 'draw' — Name wird immer aktuell gehalten."""
     col = _get_dice_col()
     inc = {"wins": 0, "losses": 0, "draws": 0, "games": 1}
-    if result == "win":
-        inc["wins"] = 1
-    elif result == "loss":
-        inc["losses"] = 1
-    else:
-        inc["draws"] = 1
+    if result == "win":    inc["wins"]   = 1
+    elif result == "loss": inc["losses"] = 1
+    else:                  inc["draws"]  = 1
     col.find_one_and_update(
         {"user_id": user_id},
-        {
-            "$set": {"name": display_name},
-            "$inc": inc,
-            "$setOnInsert": {"user_id": user_id},
-        },
+        {"$set": {"name": display_name}, "$inc": inc, "$setOnInsert": {"user_id": user_id}},
         upsert=True,
         return_document=ReturnDocument.AFTER,
     )
 
 
 def db_get_ranking(limit: int = 10) -> list:
-    """Gibt Top-Spieler sortiert nach Wins zurück."""
     col = _get_dice_col()
     return list(col.find(
         {"games": {"$gt": 0}},
@@ -136,7 +127,6 @@ def db_get_ranking(limit: int = 10) -> list:
 
 
 def db_get_player(user_id: int) -> dict | None:
-    """Gibt Statistik eines einzelnen Spielers zurück."""
     col = _get_dice_col()
     return col.find_one({"user_id": user_id}, {"_id": 0})
 
@@ -568,11 +558,8 @@ async def cmd_wuerfel(ctx, seiten: int = 6):
         return
 
     result = _random.randint(1, seiten)
-    face = DICE_FACES.get(result, "🎲")
-
     # Bewertung
     pct = result / seiten
-    big_dice = DICE_FACES.get(result, "") if seiten == 6 else ""
 
     if pct == 1.0:
         de, fr, en = "🏆 **MAXIMUM!** Unglaublich!", "🏆 **MAXIMUM!** Incroyable!", "🏆 **MAXIMUM!** Incredible!"
@@ -590,12 +577,8 @@ async def cmd_wuerfel(ctx, seiten: int = 6):
         de, fr, en = "💀 Kritischer Misserfolg!", "💀 Échec critique!", "💀 Critical failure!"
         color = 0xE74C3C
 
-    dice_line = f"# {big_dice} {result} {big_dice}" if big_dice else f"# {result}"
-    embed = discord.Embed(title=f"{face} W{seiten}-Wurf / Lancer W{seiten} / W{seiten} Roll", color=color)
-    embed.add_field(name=f"🎲 {ctx.author.display_name}", value=dice_line, inline=False)
-    embed.add_field(name="🇩🇪", value=de, inline=True)
-    embed.add_field(name="🇫🇷", value=fr, inline=True)
-    embed.add_field(name="🇬🇧", value=en, inline=True)
+    embed = discord.Embed(title=f"W{seiten}-Wurf", description=f"# {result}", color=color)
+    embed.add_field(name=ctx.author.display_name, value=f"🇩🇪 {de}  🇫🇷 {fr}  🇬🇧 {en}", inline=False)
     embed.set_footer(text=f"1–{seiten} möglich / possible", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
@@ -653,17 +636,13 @@ async def cmd_duell(ctx):
             color = 0x9B59B6
             c_result, o_result = "draw", "draw"
 
-        # Statistiken in MongoDB speichern (Name wird dabei aktualisiert)
         try:
             db_update_stats(challenger_id, challenger_name, c_result)
             db_update_stats(opponent_id, opponent_name, o_result)
         except Exception as e:
             log.error(f"DB stats error: {e}")
 
-        embed = discord.Embed(
-            title="🎲 Würfelduell — Ergebnis! / Résultat ! / Result!",
-            color=color
-        )
+        embed = discord.Embed(title="🎲 Würfelduell — Ergebnis! / Résultat ! / Result!", color=color)
         embed.add_field(name=challenger_name, value=f"# {roll1}", inline=True)
         embed.add_field(name="VS", value="⚔️", inline=True)
         embed.add_field(name=opponent_name, value=f"# {roll2}", inline=True)
@@ -684,19 +663,16 @@ async def cmd_duell(ctx):
             "roll": roll,
         }
 
-        embed = discord.Embed(
-            title="🎲 Würfelduell / Duel de dés / Dice Duel",
-            color=0x9B59B6
-        )
+        embed = discord.Embed(title="🎲 Würfelduell / Duel de dés / Dice Duel", color=0x9B59B6)
         embed.add_field(
             name=ctx.author.display_name,
             value=(
-                f"🇩🇪 **{ctx.author.display_name}** fordert zum Würfelduell heraus! Tippe `!duell` um mitzuspielen!\n"
-                f"🇫🇷 **{ctx.author.display_name}** lance un duel de dés ! Tape `!duell` pour jouer !\n"
-                f"🇬🇧 **{ctx.author.display_name}** challenges you to a dice duel! Type `!duell` to join!\n\n"
-                "🇩🇪 *(Die Würfel werden erst am Ende aufgedeckt)*\n"
-                "🇫🇷 *(Les dés seront révélés à la fin)*\n"
-                "🇬🇧 *(Dice are revealed at the end)*"
+                f"🇩🇪 **{ctx.author.display_name}** fordert zum Würfelduell heraus! Tippe `!duell` zum Mitspielen!\n"
+                f"🇫🇷 **{ctx.author.display_name}** lance un duel ! Tape `!duell` pour jouer !\n"
+                f"🇬🇧 **{ctx.author.display_name}** challenges you! Type `!duell` to join!\n\n"
+                "🇩🇪 *(Würfel werden erst am Ende aufgedeckt)*\n"
+                "🇫🇷 *(Dés révélés à la fin)*\n"
+                "🇬🇧 *(Dice revealed at the end)*"
             ),
             inline=False
         )
@@ -710,8 +686,8 @@ async def cmd_duell(ctx):
             try:
                 await ctx.send(
                     f"⏰ **{ctx.author.display_name}**: "
-                    f"🇩🇪 Würfelduell abgelaufen — niemand hat angenommen. "
-                    f"🇫🇷 Duel expiré — personne n'a accepté. "
+                    f"🇩🇪 Würfelduell abgelaufen — niemand hat angenommen.  "
+                    f"🇫🇷 Duel expiré — personne n\'a accepté.  "
                     f"🇬🇧 Duel expired — nobody joined.",
                     delete_after=10
                 )
@@ -728,42 +704,30 @@ MEDALS = ["🥇", "🥈", "🥉"]
 
 @bot.command(name="ranking", aliases=["rank", "stats", "leaderboard", "top", "classement", "rang"])
 async def cmd_ranking(ctx, member: discord.Member = None):
-    """
-    !ranking          → Top-10 Würfelduelle
-    !ranking @User    → Statistik eines bestimmten Spielers
-    """
     if member is not None:
-        # Einzelspieler-Statistik
         try:
             data = db_get_player(member.id)
         except Exception as e:
             await ctx.send(f"❌ DB-Fehler: {e}", delete_after=8)
             return
-
         if not data:
-            embed = discord.Embed(
-                description=(
-                    f"🇩🇪 **{member.display_name}** hat noch keine Duelle gespielt.\n"
-                    f"🇫🇷 **{member.display_name}** n'a pas encore joué.\n"
-                    f"🇬🇧 **{member.display_name}** has not played yet."
-                ),
-                color=0x95A5A6
+            await ctx.send(
+                f"🇩🇪 **{member.display_name}** hat noch keine Duelle gespielt.  "
+                f"🇫🇷 Aucune partie.  🇬🇧 No games yet.",
+                delete_after=8
             )
-            await ctx.send(embed=embed)
             return
-
         wins   = data.get("wins",   0)
         losses = data.get("losses", 0)
         draws  = data.get("draws",  0)
         games  = data.get("games",  0)
         wr     = round(wins / games * 100) if games else 0
-
         embed = discord.Embed(
             title=f"🎲 {data.get('name', member.display_name)}",
-            color=0xF1C40F if wins > losses else 0x3498DB
+            color=0xF1C40F if wins >= losses else 0x3498DB
         )
         embed.add_field(
-            name="🇩🇪 Statistik  🇫🇷 Statistiques  🇬🇧 Stats",
+            name="🇩🇪 Statistik  /  🇫🇷 Statistiques  /  🇬🇧 Stats",
             value=(
                 f"🏆 **{wins}** Siege / Victoires / Wins\n"
                 f"💀 **{losses}** Niederlagen / Défaites / Losses\n"
@@ -777,20 +741,17 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         await ctx.send(embed=embed)
         return
 
-    # Top-10 Ranking
     try:
         top = db_get_ranking(10)
     except Exception as e:
         await ctx.send(f"❌ DB-Fehler: {e}", delete_after=8)
         return
-
     if not top:
         await ctx.send(
-            "🇩🇪 Noch keine Daten vorhanden.  🇫🇷 Aucune donnée.  🇬🇧 No data yet.",
+            "🇩🇪 Noch keine Duelle gespielt.  🇫🇷 Aucune donnée.  🇬🇧 No data yet.",
             delete_after=8
         )
         return
-
     lines = []
     for i, p in enumerate(top):
         medal  = MEDALS[i] if i < 3 else f"`{i+1}.`"
@@ -799,10 +760,7 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         draws  = p.get("draws",  0)
         games  = p.get("games",  0)
         wr     = round(wins / games * 100) if games else 0
-        lines.append(
-            f"{medal} **{p['name']}** — 🏆 {wins}W / 💀 {losses}L / 🤝 {draws}D  *(📊 {wr}%)*"
-        )
-
+        lines.append(f"{medal} **{p['name']}** — 🏆 {wins}W / 💀 {losses}L / 🤝 {draws}D  *(📊 {wr}%)*")
     embed = discord.Embed(
         title="🎲 Würfel-Ranking / Classement / Leaderboard",
         description="\n".join(lines),
