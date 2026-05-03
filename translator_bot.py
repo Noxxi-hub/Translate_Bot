@@ -763,7 +763,7 @@ async def cmd_ranking(ctx, member: discord.Member = None):
             return
         if not data:
             await ctx.send(
-                f"🇩🇪 **{member.display_name}** hat noch keine Duelle gespielt.  "
+                f"🇩🇪 **{member.display_name}** hat noch keine Spiele gespielt.  "
                 f"🇫🇷 Aucune partie.  🇬🇧 No games yet.",
                 delete_after=8
             )
@@ -772,14 +772,16 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         losses = data.get("losses", 0)
         draws  = data.get("draws",  0)
         games  = data.get("games",  0)
+        pts    = data.get("points", 0)
         wr     = round(wins / games * 100) if games else 0
         embed = discord.Embed(
-            title=f"🎲 {data.get('name', member.display_name)}",
-            color=0xF1C40F if wins >= losses else 0x3498DB
+            title=f"🎮 {data.get('name', member.display_name)}",
+            color=0xF1C40F if pts >= 0 else 0xE74C3C
         )
         embed.add_field(
             name="🇩🇪 Statistik  /  🇫🇷 Statistiques  /  🇬🇧 Stats",
             value=(
+                f"💰 **{pts}** Punkte / Points\n"
                 f"🏆 **{wins}** Siege / Victoires / Wins\n"
                 f"💀 **{losses}** Niederlagen / Défaites / Losses\n"
                 f"🤝 **{draws}** Unentschieden / Égalités / Draws\n"
@@ -788,7 +790,12 @@ async def cmd_ranking(ctx, member: discord.Member = None):
             ),
             inline=False
         )
-        embed.set_footer(text="VHA Würfelranking", icon_url=LOGO_URL)
+        embed.add_field(
+            name="🎮 Spiele / Jeux / Games",
+            value="`!würfel` `!duell` `!bombe` `!hot` `!roulette` `!raub @User`",
+            inline=False
+        )
+        embed.set_footer(text="VHA Spiele-Ranking", icon_url=LOGO_URL)
         await ctx.send(embed=embed)
         return
 
@@ -810,14 +817,602 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         losses = p.get("losses", 0)
         draws  = p.get("draws",  0)
         games  = p.get("games",  0)
+        pts    = p.get("points", 0)
         wr     = round(wins / games * 100) if games else 0
-        lines.append(f"{medal} **{p['name']}** — 🏆 {wins}W / 💀 {losses}L / 🤝 {draws}D  *(📊 {wr}%)*")
+        lines.append(f"{medal} **{p['name']}** — 💰 **{pts}** Pkt  *(🏆{wins}W / 💀{losses}L / 📊{wr}%)*")
     embed = discord.Embed(
-        title="🎲 Würfel-Ranking / Classement / Leaderboard",
+        title="🏆 VHA Spiele-Ranking / Classement / Leaderboard",
         description="\n".join(lines),
         color=0xF1C40F
     )
-    embed.set_footer(text="VHA Würfelranking  •  !ranking @User für Details", icon_url=LOGO_URL)
+    embed.add_field(
+        name="🎮 Spiele / Jeux / Games",
+        value="`!würfel` `!duell` `!bombe` `!hot` `!roulette` `!raub @User`",
+        inline=False
+    )
+    embed.set_footer(text="VHA Spiele-Ranking  •  !ranking @User für Details", icon_url=LOGO_URL)
+    await ctx.send(embed=embed)
+
+
+# ────────────────────────────────────────────────
+# BOMBEN-ENTSCHÄRFER 💣
+# ────────────────────────────────────────────────
+
+class BombenView(discord.ui.View):
+    def __init__(self, safe: str):
+        super().__init__(timeout=30)
+        self.safe     = safe
+        self.resolved = False
+
+    async def _handle(self, interaction: discord.Interaction, color: str):
+        if self.resolved:
+            await interaction.response.send_message(
+                "🇩🇪 Die Bombe wurde bereits entschärft!\n"
+                "🇫🇷 La bombe a déjà été désamorcée !\n"
+                "🇬🇧 The bomb has already been defused!",
+                ephemeral=True
+            )
+            return
+        self.resolved = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        name = interaction.user.display_name
+        uid  = interaction.user.id
+        if color == self.safe:
+            pts = 15
+            db_add_points(uid, name, pts)
+            db_update_stats(uid, name, "win")
+            embed = discord.Embed(title="💣 ENTSCHÄRFT! / DÉSAMORCÉE ! / DEFUSED!", color=0x2ECC71)
+            embed.add_field(
+                name=f"✅ {name}",
+                value=(
+                    f"🇩🇪 **{name}** hat den richtigen Draht (**{color}**) durchtrennt!\n"
+                    f"🇫🇷 **{name}** a coupé le bon fil (**{color}**) !\n"
+                    f"🇧🇷 **{name}** cortou o fio certo (**{color}**)!\n"
+                    f"🇬🇧 **{name}** cut the right wire (**{color}**)!\n\n"
+                    f"💰 **+{pts} Punkte / Points**"
+                ),
+                inline=False
+            )
+        else:
+            pts = 10
+            db_add_points(uid, name, -pts)
+            db_update_stats(uid, name, "loss")
+            embed = discord.Embed(title="💥 EXPLOSION! / EXPLOSION ! / EXPLOSION!", color=0xE74C3C)
+            embed.add_field(
+                name=f"💀 {name}",
+                value=(
+                    f"🇩🇪 **{name}** hat den falschen Draht (**{color}**) durchtrennt — BOOM! 💥\n"
+                    f"🇫🇷 **{name}** a coupé le mauvais fil (**{color}**) — BOOM! 💥\n"
+                    f"🇧🇷 **{name}** cortou o fio errado (**{color}**) — BOOM! 💥\n"
+                    f"🇬🇧 **{name}** cut the wrong wire (**{color}**) — BOOM! 💥\n\n"
+                    f"💸 **-{pts} Punkte / Points**\n"
+                    f"ℹ️ 🇩🇪 Richtiger Draht war: **{self.safe}**  🇫🇷 Bon fil: **{self.safe}**  🇬🇧 Right wire: **{self.safe}**\n\n"
+                    f"ℹ️ 🇩🇪 Bei falscher Wahl verlierst du **{pts} Punkte**.\n"
+                    f"ℹ️ 🇫🇷 Mauvais choix = **{pts} points** perdus.\n"
+                    f"ℹ️ 🇬🇧 Wrong choice = **{pts} points** lost."
+                ),
+                inline=False
+            )
+        embed.set_footer(text="VHA Bomben-Entschärfer", icon_url=LOGO_URL)
+        await interaction.followup.send(embed=embed)
+
+    @discord.ui.button(label="🔴 Rot / Rouge / Red", style=discord.ButtonStyle.danger, custom_id="bombe_rot")
+    async def btn_rot(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, "rot")
+
+    @discord.ui.button(label="🔵 Blau / Bleu / Blue", style=discord.ButtonStyle.primary, custom_id="bombe_blau")
+    async def btn_blau(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, "blau")
+
+    @discord.ui.button(label="🟡 Gelb / Jaune / Yellow", style=discord.ButtonStyle.secondary, custom_id="bombe_gelb")
+    async def btn_gelb(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._handle(interaction, "gelb")
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+@bot.command(name="bombe", aliases=["bomb", "bombe💣"])
+async def cmd_bombe(ctx):
+    """Bomben-Entschärfer — schneide den richtigen Draht!"""
+    safe = _random.choice(["rot", "blau", "gelb"])
+    view = BombenView(safe=safe)
+    embed = discord.Embed(title="💣 BOMBEN-ENTSCHÄRFER / DÉMINEUR / BOMB DEFUSER", color=0xE74C3C)
+    embed.add_field(
+        name="⚠️ Achtung / Attention / Warning",
+        value=(
+            "🇩🇪 Eine Bombe wurde entdeckt! Schneide den richtigen Draht durch!\n"
+            "🇫🇷 Une bombe a été détectée ! Coupe le bon fil !\n"
+            "🇧🇷 Uma bomba foi detectada! Corte o fio certo!\n"
+            "🇬🇧 A bomb has been detected! Cut the right wire!\n\n"
+            "🎯 **Wer zuerst drückt, entscheidet das Schicksal! / Whoever presses first decides the fate!**\n\n"
+            "💰 🇩🇪 Richtig: **+15 Punkte** • Falsch: **-10 Punkte**\n"
+            "💰 🇫🇷 Correct: **+15 points** • Mauvais: **-10 points**\n"
+            "💰 🇧🇷 Correto: **+15 pontos** • Errado: **-10 pontos**\n"
+            "💰 🇬🇧 Correct: **+15 points** • Wrong: **-10 points**"
+        ),
+        inline=False
+    )
+    embed.set_footer(text="⏱️ 30s • Jeder kann drücken! • VHA Bomben-Entschärfer", icon_url=LOGO_URL)
+    await ctx.send(embed=embed, view=view)
+
+
+# ────────────────────────────────────────────────
+# HÖHER ODER TIEFER 📈
+# ────────────────────────────────────────────────
+
+class HotView(discord.ui.View):
+    def __init__(self, author_id: int, current: int, streak: int, points: int):
+        super().__init__(timeout=30)
+        self.author_id = author_id
+        self.current   = current
+        self.streak    = streak
+        self.points    = points
+
+    async def _check_user(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "🇩🇪 Das ist nicht dein Spiel!\n🇫🇷 Ce n'est pas ton jeu !\n🇬🇧 This is not your game!",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def _guess(self, interaction: discord.Interaction, higher: bool):
+        if not await self._check_user(interaction):
+            return
+        next_roll = _random.randint(1, 6)
+        tie     = next_roll == self.current
+        correct = (higher and next_roll > self.current) or (not higher and next_roll < self.current)
+        name = interaction.user.display_name
+        uid  = interaction.user.id
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        if tie:
+            embed = discord.Embed(title="🤝 Unentschieden! / Égalité ! / Tie!", color=0x9B59B6)
+            embed.add_field(
+                name=f"➡️ {name}",
+                value=(
+                    f"🇩🇪 Nächste Zahl war auch **{next_roll}** — Unentschieden! Punkte bleiben.\n"
+                    f"🇫🇷 Le prochain chiffre était aussi **{next_roll}** — Égalité !\n"
+                    f"🇧🇷 O próximo número também foi **{next_roll}** — Empate!\n"
+                    f"🇬🇧 Next number was also **{next_roll}** — Tie! Points kept.\n\n"
+                    f"💰 Gesichert / Secured: **{self.points} Punkte / Points**"
+                ),
+                inline=False
+            )
+            db_add_points(uid, name, self.points)
+            db_update_stats(uid, name, "draw")
+            embed.set_footer(text="VHA Höher oder Tiefer", icon_url=LOGO_URL)
+            await interaction.followup.send(embed=embed)
+            return
+
+        if correct:
+            self.streak += 1
+            gained = 3 * self.streak
+            self.points += gained
+            new_view = HotView(author_id=uid, current=next_roll, streak=self.streak, points=self.points)
+            embed = discord.Embed(title="✅ Richtig! / Correct ! / Correct!", color=0x2ECC71)
+            embed.add_field(
+                name=f"🔥 Streak x{self.streak} — {name}",
+                value=(
+                    f"🇩🇪 Nächste Zahl: **{next_roll}** — Richtig! **+{gained} Punkte**\n"
+                    f"🇫🇷 Prochain chiffre: **{next_roll}** — Correct ! **+{gained} points**\n"
+                    f"🇧🇷 Próximo número: **{next_roll}** — Correto! **+{gained} pontos**\n"
+                    f"🇬🇧 Next number: **{next_roll}** — Correct! **+{gained} points**\n\n"
+                    f"💰 Gesamt / Total: **{self.points} Punkte**\n\n"
+                    f"🇩🇪 Weitermachen und riskieren oder Punkte sichern?\n"
+                    f"🇫🇷 Continuer et risquer ou sécuriser les points ?\n"
+                    f"🇧🇷 Continuar e arriscar ou garantir os pontos?\n"
+                    f"🇬🇧 Keep going and risk it or secure your points?"
+                ),
+                inline=False
+            )
+            embed.set_footer(text=f"⏱️ 30s • Aktuelle Zahl: {next_roll} • VHA Höher oder Tiefer", icon_url=LOGO_URL)
+            await interaction.followup.send(embed=embed, view=new_view)
+        else:
+            lost = self.points
+            if lost > 0:
+                db_add_points(uid, name, -lost)
+            db_update_stats(uid, name, "loss")
+            embed = discord.Embed(title="❌ Falsch! / Faux ! / Wrong!", color=0xE74C3C)
+            embed.add_field(
+                name=f"💀 {name}",
+                value=(
+                    f"🇩🇪 Nächste Zahl war **{next_roll}** — Falsch! Alle Punkte verloren!\n"
+                    f"🇫🇷 Le prochain chiffre était **{next_roll}** — Faux ! Tous les points perdus !\n"
+                    f"🇧🇷 O próximo número foi **{next_roll}** — Errado! Todos os pontos perdidos!\n"
+                    f"🇬🇧 Next number was **{next_roll}** — Wrong! All points lost!\n\n"
+                    f"💸 **-{lost} Punkte / Points** verloren / lost\n\n"
+                    f"ℹ️ 🇩🇪 Bei falscher Antwort verlierst du alle gesammelten Punkte dieser Runde.\n"
+                    f"ℹ️ 🇫🇷 Mauvaise réponse = tous les points de ce tour sont perdus.\n"
+                    f"ℹ️ 🇬🇧 Wrong answer = all points collected this round are lost."
+                ),
+                inline=False
+            )
+            embed.set_footer(text="VHA Höher oder Tiefer", icon_url=LOGO_URL)
+            await interaction.followup.send(embed=embed)
+
+    @discord.ui.button(label="⬆️ Höher / Plus haut / Higher", style=discord.ButtonStyle.success, custom_id="hot_higher")
+    async def btn_higher(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._guess(interaction, higher=True)
+
+    @discord.ui.button(label="⬇️ Tiefer / Plus bas / Lower", style=discord.ButtonStyle.danger, custom_id="hot_lower")
+    async def btn_lower(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._guess(interaction, higher=False)
+
+    @discord.ui.button(label="💰 Stop & Sichern / Sécuriser / Cash Out", style=discord.ButtonStyle.secondary, custom_id="hot_stop")
+    async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._check_user(interaction):
+            return
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        name = interaction.user.display_name
+        uid  = interaction.user.id
+        db_add_points(uid, name, self.points)
+        db_update_stats(uid, name, "win")
+        embed = discord.Embed(title="💰 Gesichert! / Sécurisé ! / Cashed Out!", color=0xF1C40F)
+        embed.add_field(
+            name=f"✅ {name}",
+            value=(
+                f"🇩🇪 **{name}** sichert **{self.points} Punkte**!\n"
+                f"🇫🇷 **{name}** sécurise **{self.points} points** !\n"
+                f"🇧🇷 **{name}** garantiu **{self.points} pontos**!\n"
+                f"🇬🇧 **{name}** cashes out **{self.points} points**!"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="VHA Höher oder Tiefer", icon_url=LOGO_URL)
+        await interaction.followup.send(embed=embed)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+@bot.command(name="hot", aliases=["höher", "highlow", "hochtief"])
+async def cmd_hot(ctx):
+    """Höher oder Tiefer mit Streak-Bonus."""
+    start = _random.randint(1, 6)
+    view  = HotView(author_id=ctx.author.id, current=start, streak=0, points=0)
+    embed = discord.Embed(
+        title="📈 HÖHER ODER TIEFER / PLUS HAUT OU PLUS BAS / HIGHER OR LOWER",
+        color=0x3498DB
+    )
+    embed.add_field(
+        name=f"🎲 {ctx.author.display_name}",
+        value=(
+            f"🇩🇪 Aktuelle Zahl: **{start}** — Ist die nächste höher oder tiefer?\n"
+            f"🇫🇷 Chiffre actuel: **{start}** — Le suivant est-il plus haut ou plus bas ?\n"
+            f"🇧🇷 Número atual: **{start}** — O próximo é maior ou menor?\n"
+            f"🇬🇧 Current number: **{start}** — Is the next one higher or lower?\n\n"
+            f"🔥 🇩🇪 Jeder richtige Tipp = mehr Punkte (Streak-Bonus x3)!\n"
+            f"🔥 🇫🇷 Chaque bonne réponse = plus de points (bonus de série x3) !\n"
+            f"🔥 🇧🇷 Cada resposta correta = mais pontos (bônus x3)!\n"
+            f"🔥 🇬🇧 Each correct guess = more points (streak bonus x3)!\n\n"
+            f"💸 🇩🇪 Falsch geraten = **alle Punkte verloren!**\n"
+            f"💸 🇫🇷 Mauvaise réponse = **tous les points perdus !**\n"
+            f"💸 🇬🇧 Wrong guess = **all points lost!**"
+        ),
+        inline=False
+    )
+    embed.set_footer(
+        text=f"⏱️ 30s • Nur {ctx.author.display_name} kann klicken • VHA Höher oder Tiefer",
+        icon_url=LOGO_URL
+    )
+    await ctx.send(embed=embed, view=view)
+
+
+# ────────────────────────────────────────────────
+# RUSSISCHES ROULETTE 🎰
+# ────────────────────────────────────────────────
+
+ROULETTE_TIMER   = 30
+ROULETTE_TIMEOUT = 60
+
+_roulette_games: dict = {}
+
+
+class RouletteJoinView(discord.ui.View):
+    def __init__(self, channel_id: int):
+        super().__init__(timeout=ROULETTE_TIMER)
+        self.channel_id = channel_id
+
+    @discord.ui.button(
+        label="🔫 Beitreten / Rejoindre / Join / Entrar",
+        style=discord.ButtonStyle.danger,
+        custom_id="roulette_join"
+    )
+    async def btn_join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        game = _roulette_games.get(self.channel_id)
+        if not game:
+            await interaction.response.send_message("❌ Spiel nicht mehr aktiv.", ephemeral=True)
+            return
+        uid  = interaction.user.id
+        name = interaction.user.display_name
+        if any(p["id"] == uid for p in game["players"]):
+            await interaction.response.send_message(
+                "🇩🇪 Du bist bereits dabei!\n🇫🇷 Tu es déjà inscrit !\n🇬🇧 You already joined!",
+                ephemeral=True
+            )
+            return
+        game["players"].append({"id": uid, "name": name})
+        count = len(game["players"])
+        await interaction.response.send_message(
+            f"✅ **{name}** — 🇩🇪 beigetreten ({count} Spieler) / "
+            f"🇫🇷 rejoint ({count} joueurs) / "
+            f"🇧🇷 entrou ({count} jogadores) / "
+            f"🇬🇧 joined ({count} players)!",
+            ephemeral=True
+        )
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+@bot.command(name="roulette", aliases=["russisch", "russischeroulette"])
+async def cmd_roulette(ctx):
+    """Russisches Roulette — einer verliert und bekommt Timeout."""
+    channel_id = ctx.channel.id
+    if channel_id in _roulette_games:
+        await ctx.send(
+            "🇩🇪 Es läuft bereits ein Roulette!\n"
+            "🇫🇷 Une roulette est déjà en cours !\n"
+            "🇬🇧 A roulette is already running!",
+            delete_after=6
+        )
+        return
+
+    _roulette_games[channel_id] = {
+        "players": [{"id": ctx.author.id, "name": ctx.author.display_name}]
+    }
+
+    view = RouletteJoinView(channel_id)
+    embed = discord.Embed(
+        title="🎰 RUSSISCHES ROULETTE / ROULETTE RUSSE / RUSSIAN ROULETTE",
+        color=0xE74C3C
+    )
+    embed.add_field(
+        name="🔫 Wer wagt es?",
+        value=(
+            f"🇩🇪 **{ctx.author.display_name}** startet Russisches Roulette!\n"
+            f"🇫🇷 **{ctx.author.display_name}** lance la roulette russe !\n"
+            f"🇧🇷 **{ctx.author.display_name}** inicia a roleta russa!\n"
+            f"🇬🇧 **{ctx.author.display_name}** starts Russian Roulette!\n\n"
+            f"🇩🇪 Klicke auf Beitreten! Auswertung in **{ROULETTE_TIMER}s**.\n"
+            f"🇫🇷 Clique sur Rejoindre ! Résultat dans **{ROULETTE_TIMER}s**.\n"
+            f"🇧🇷 Clique em Entrar! Resultado em **{ROULETTE_TIMER}s**.\n"
+            f"🇬🇧 Click Join! Result in **{ROULETTE_TIMER}s**.\n\n"
+            f"⚠️ 🇩🇪 **Verlierer bekommt {ROULETTE_TIMEOUT}s Timeout** (falls Bot Berechtigung hat) **-20 Punkte**\n"
+            f"⚠️ 🇫🇷 **Le perdant reçoit {ROULETTE_TIMEOUT}s de timeout** (si le bot a la permission) **-20 points**\n"
+            f"⚠️ 🇧🇷 **O perdedor recebe timeout de {ROULETTE_TIMEOUT}s** (se o bot tiver permissão) **-20 pontos**\n"
+            f"⚠️ 🇬🇧 **Loser gets {ROULETTE_TIMEOUT}s timeout** (if bot has permission) **-20 points**\n\n"
+            f"🏆 🇩🇪 Überlebende: **+8 Punkte** | 🇫🇷 Survivants: **+8 points** | 🇬🇧 Survivors: **+8 points**"
+        ),
+        inline=False
+    )
+    embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s zum Beitreten • VHA Russisches Roulette", icon_url=LOGO_URL)
+    msg = await ctx.send(embed=embed, view=view)
+
+    await asyncio.sleep(ROULETTE_TIMER)
+
+    game = _roulette_games.pop(channel_id, None)
+    if not game:
+        return
+
+    players = game["players"]
+    for item in view.children:
+        item.disabled = True
+    try:
+        await msg.edit(view=view)
+    except Exception:
+        pass
+
+    if len(players) < 2:
+        await ctx.send(
+            "🇩🇪 Zu wenige Spieler — Roulette abgebrochen.\n"
+            "🇫🇷 Pas assez de joueurs — roulette annulée.\n"
+            "🇬🇧 Not enough players — roulette cancelled.",
+            delete_after=10
+        )
+        return
+
+    loser   = _random.choice(players)
+    winners = [p for p in players if p["id"] != loser["id"]]
+
+    try:
+        db_add_points(loser["id"], loser["name"], -20)
+        db_update_stats(loser["id"], loser["name"], "loss")
+        for w in winners:
+            db_add_points(w["id"], w["name"], 8)
+            db_update_stats(w["id"], w["name"], "win")
+    except Exception as e:
+        log.error(f"Roulette DB error: {e}")
+
+    timeout_done = False
+    try:
+        member = ctx.guild.get_member(loser["id"])
+        if member:
+            import datetime
+            await member.timeout(
+                datetime.timedelta(seconds=ROULETTE_TIMEOUT),
+                reason="Russisches Roulette verloren"
+            )
+            timeout_done = True
+    except Exception as e:
+        log.warning(f"Timeout fehlgeschlagen: {e}")
+
+    winner_names = " • ".join(w["name"] for w in winners)
+    timeout_info = (
+        f"\n🔇 🇩🇪 **{loser['name']}** ist für **{ROULETTE_TIMEOUT}s stummgeschaltet!**\n"
+        f"🔇 🇫🇷 **{loser['name']}** est muet pour **{ROULETTE_TIMEOUT}s** !\n"
+        f"🔇 🇬🇧 **{loser['name']}** is muted for **{ROULETTE_TIMEOUT}s**!"
+    ) if timeout_done else (
+        f"\n⚠️ 🇩🇪 Timeout nicht möglich (Bot braucht 'Timeout-Mitglieder'-Berechtigung).\n"
+        f"⚠️ 🇫🇷 Timeout impossible (le bot a besoin de la permission 'Timeout membres').\n"
+        f"⚠️ 🇬🇧 Timeout not possible (bot needs 'Timeout members' permission)."
+    )
+
+    embed_result = discord.Embed(
+        title="🎰 ROULETTE — ERGEBNIS / RÉSULTAT / RESULT",
+        color=0xE74C3C
+    )
+    embed_result.add_field(
+        name=f"💀 Verlierer / Perdant / Loser: {loser['name']}",
+        value=(
+            f"🇩🇪 **{loser['name']}** hat das Pech gehabt! **-20 Punkte**\n"
+            f"🇫🇷 **{loser['name']}** a eu la malchance ! **-20 points**\n"
+            f"🇧🇷 **{loser['name']}** teve azar! **-20 pontos**\n"
+            f"🇬🇧 **{loser['name']}** had the bad luck! **-20 points**"
+            + timeout_info
+        ),
+        inline=False
+    )
+    embed_result.add_field(
+        name=f"🏆 Überlebende / Survivants / Survivors: {winner_names}",
+        value=(
+            f"🇩🇪 Alle anderen: **+8 Punkte** pro Spieler\n"
+            f"🇫🇷 Tous les autres: **+8 points** par joueur\n"
+            f"🇧🇷 Todos os outros: **+8 pontos** por jogador\n"
+            f"🇬🇧 Everyone else: **+8 points** per player"
+        ),
+        inline=False
+    )
+    embed_result.set_footer(text="VHA Russisches Roulette", icon_url=LOGO_URL)
+    await ctx.send(embed=embed_result)
+
+
+# ────────────────────────────────────────────────
+# RAUBZUG 🦹
+# ────────────────────────────────────────────────
+
+_jail: dict = {}
+JAIL_MINUTES = 5
+
+@bot.command(name="raub", aliases=["steal", "vol", "roubo"])
+async def cmd_raub(ctx, target: discord.Member = None):
+    """Raubzug — stehle Punkte von einem anderen Spieler!"""
+    if target is None:
+        await ctx.send(
+            "🇩🇪 Benutzung: `!raub @Spieler`\n"
+            "🇫🇷 Utilisation: `!raub @joueur`\n"
+            "🇧🇷 Uso: `!raub @jogador`\n"
+            "🇬🇧 Usage: `!raub @player`",
+            delete_after=8
+        )
+        return
+    if target.id == ctx.author.id:
+        await ctx.send(
+            "🇩🇪 Du kannst dich nicht selbst ausrauben!\n"
+            "🇫🇷 Tu ne peux pas te voler toi-même !\n"
+            "🇬🇧 You can't rob yourself!",
+            delete_after=6
+        )
+        return
+    if target.bot:
+        await ctx.send(
+            "🇩🇪 Bots haben keine Punkte!\n"
+            "🇫🇷 Les bots n'ont pas de points !\n"
+            "🇬🇧 Bots have no points!",
+            delete_after=6
+        )
+        return
+
+    now = time.time()
+    if ctx.author.id in _jail and now < _jail[ctx.author.id]:
+        remaining = int((_jail[ctx.author.id] - now) / 60) + 1
+        await ctx.send(
+            f"🔒 🇩🇪 **{ctx.author.display_name}** sitzt noch **{remaining} Min.** im Gefängnis — kein Raubzug möglich!\n"
+            f"🔒 🇫🇷 **{ctx.author.display_name}** est encore en prison pour **{remaining} min** !\n"
+            f"🔒 🇧🇷 **{ctx.author.display_name}** ainda está na prisão por **{remaining} min**!\n"
+            f"🔒 🇬🇧 **{ctx.author.display_name}** is still in jail for **{remaining} min** — no robbery!",
+            delete_after=10
+        )
+        return
+
+    attacker_name = ctx.author.display_name
+    defender_name = target.display_name
+    success = _random.random() < 0.30
+
+    if success:
+        stolen = _random.randint(5, 20)
+        db_add_points(ctx.author.id, attacker_name, stolen)
+        db_add_points(target.id, defender_name, -stolen)
+        db_update_stats(ctx.author.id, attacker_name, "win")
+        db_update_stats(target.id, defender_name, "loss")
+        embed = discord.Embed(
+            title="🦹 RAUBZUG ERFOLGREICH! / BRAQUAGE RÉUSSI ! / ROBBERY SUCCESSFUL!",
+            color=0x2ECC71
+        )
+        embed.add_field(
+            name=f"💰 {attacker_name} → {defender_name}",
+            value=(
+                f"🇩🇪 **{attacker_name}** hat **{defender_name}** erfolgreich ausgeraubt! **+{stolen} Punkte**\n"
+                f"🇫🇷 **{attacker_name}** a réussi à voler **{defender_name}** ! **+{stolen} points**\n"
+                f"🇧🇷 **{attacker_name}** roubou com sucesso de **{defender_name}**! **+{stolen} pontos**\n"
+                f"🇬🇧 **{attacker_name}** successfully robbed **{defender_name}**! **+{stolen} points**\n\n"
+                f"💸 **{defender_name}**: **-{stolen} Punkte / Points**"
+            ),
+            inline=False
+        )
+    else:
+        jail = _random.random() < 0.50
+        if jail:
+            _jail[ctx.author.id] = now + JAIL_MINUTES * 60
+            db_update_stats(ctx.author.id, attacker_name, "loss")
+            embed = discord.Embed(
+                title="🔒 ERWISCHT & VERHAFTET! / ARRÊTÉ ! / CAUGHT & JAILED!",
+                color=0xE74C3C
+            )
+            embed.add_field(
+                name=f"👮 {attacker_name}",
+                value=(
+                    f"🇩🇪 **{attacker_name}** wurde beim Rauben erwischt — ab ins Gefängnis!\n"
+                    f"🇫🇷 **{attacker_name}** a été arrêté — direction la prison !\n"
+                    f"🇧🇷 **{attacker_name}** foi pego roubando — para a prisão!\n"
+                    f"🇬🇧 **{attacker_name}** was caught robbing — off to jail!\n\n"
+                    f"⛓️ 🇩🇪 Gesperrt für **{JAIL_MINUTES} Minuten** — kein Raubzug möglich!\n"
+                    f"⛓️ 🇫🇷 Bloqué pendant **{JAIL_MINUTES} minutes** — aucun vol possible !\n"
+                    f"⛓️ 🇧🇷 Bloqueado por **{JAIL_MINUTES} minutos** — sem roubo!\n"
+                    f"⛓️ 🇬🇧 Locked for **{JAIL_MINUTES} minutes** — no robbery possible!\n\n"
+                    f"ℹ️ 🇩🇪 **Gefängnis**: Du kannst {JAIL_MINUTES} Minuten lang nicht rauben.\n"
+                    f"ℹ️ 🇫🇷 **Prison**: Tu ne peux pas voler pendant {JAIL_MINUTES} minutes.\n"
+                    f"ℹ️ 🇬🇧 **Jail**: You cannot rob for {JAIL_MINUTES} minutes."
+                ),
+                inline=False
+            )
+        else:
+            penalty = _random.randint(5, 15)
+            db_add_points(ctx.author.id, attacker_name, -penalty)
+            db_add_points(target.id, defender_name, penalty)
+            db_update_stats(ctx.author.id, attacker_name, "loss")
+            embed = discord.Embed(
+                title="😤 RAUBZUG GESCHEITERT! / BRAQUAGE RATÉ ! / ROBBERY FAILED!",
+                color=0xF39C12
+            )
+            embed.add_field(
+                name=f"🛡️ {defender_name} hat sich gewehrt!",
+                value=(
+                    f"🇩🇪 **{defender_name}** hat **{attacker_name}** erwischt! **-{penalty} Punkte** für {attacker_name}\n"
+                    f"🇫🇷 **{defender_name}** a attrapé **{attacker_name}** ! **-{penalty} points** pour {attacker_name}\n"
+                    f"🇧🇷 **{defender_name}** pegou **{attacker_name}**! **-{penalty} pontos** para {attacker_name}\n"
+                    f"🇬🇧 **{defender_name}** caught **{attacker_name}**! **-{penalty} points** for {attacker_name}\n\n"
+                    f"💰 **{defender_name}**: **+{penalty} Punkte / Points**\n\n"
+                    f"ℹ️ 🇩🇪 **Raubzug**: 30% Chance. Bei Misserfolg: Punkte verloren ODER Gefängnis.\n"
+                    f"ℹ️ 🇫🇷 **Braquage**: 30% de chance. En cas d'échec: points perdus OU prison.\n"
+                    f"ℹ️ 🇬🇧 **Robbery**: 30% chance. On failure: points lost OR jail."
+                ),
+                inline=False
+            )
+
+    embed.set_footer(text="🦹 VHA Raubzug • 30% Erfolgs-Chance", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
 
