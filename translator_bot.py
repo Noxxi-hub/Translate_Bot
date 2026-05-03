@@ -514,29 +514,31 @@ async def cmd_wuerfel(ctx, seiten: int = 6):
 
     # Bewertung
     pct = result / seiten
+    big_dice = DICE_FACES.get(result, "") if seiten == 6 else ""
+
     if pct == 1.0:
-        comment = "🏆 **MAXIMUM!** Unglaublich!"
+        de, fr, en = "🏆 **MAXIMUM!** Unglaublich!", "🏆 **MAXIMUM!** Incroyable!", "🏆 **MAXIMUM!** Incredible!"
         color = 0xF1C40F
     elif pct >= 0.8:
-        comment = "🔥 Starker Wurf!"
+        de, fr, en = "🔥 Starker Wurf!", "🔥 Beau lancer!", "🔥 Strong roll!"
         color = 0x2ECC71
     elif pct >= 0.5:
-        comment = "👍 Solider Wurf."
+        de, fr, en = "👍 Solider Wurf.", "👍 Lancer correct.", "👍 Solid roll."
         color = 0x3498DB
     elif pct >= 0.2:
-        comment = "😬 Könnte besser sein..."
+        de, fr, en = "😬 Könnte besser sein...", "😬 Peut mieux faire...", "😬 Could be better..."
         color = 0xF39C12
     else:
-        comment = "💀 Kritischer Misserfolg!"
+        de, fr, en = "💀 Kritischer Misserfolg!", "💀 Échec critique!", "💀 Critical failure!"
         color = 0xE74C3C
 
-    embed = discord.Embed(
-        title=f"{face} W{seiten}-Wurf",
-        description=f"**{ctx.author.display_name}** würfelt einen W{seiten}...\n\n"
-                    f"# {result}\n\n{comment}",
-        color=color
-    )
-    embed.set_footer(text=f"1–{seiten} möglich", icon_url=LOGO_URL)
+    dice_line = f"# {big_dice} {result} {big_dice}" if big_dice else f"# {result}"
+    embed = discord.Embed(title=f"{face} W{seiten}-Wurf / Lancer W{seiten} / W{seiten} Roll", color=color)
+    embed.add_field(name=f"🎲 {ctx.author.display_name}", value=dice_line, inline=False)
+    embed.add_field(name="🇩🇪", value=de, inline=True)
+    embed.add_field(name="🇫🇷", value=fr, inline=True)
+    embed.add_field(name="🇬🇧", value=en, inline=True)
+    embed.set_footer(text=f"1–{seiten} möglich / possible", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
 
