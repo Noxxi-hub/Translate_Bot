@@ -1162,6 +1162,7 @@ async def cmd_hot(ctx):
 
 ROULETTE_TIMER   = 30
 ROULETTE_TIMEOUT = 60
+MAX_ROULETTE_PLAYERS = 10
 
 _roulette_games: dict = {}
 
@@ -1189,6 +1190,22 @@ class RouletteJoinView(discord.ui.View):
                 "🇩🇪 Du bist bereits dabei!\n🇫🇷 Tu es déjà inscrit !\n🇬🇧 You already joined!",
                 ephemeral=True
             )
+            return
+        if len(game["players"]) >= MAX_ROULETTE_PLAYERS:
+            await interaction.response.send_message(
+                f"🇩🇪 Roulette ist voll! (max. {MAX_ROULETTE_PLAYERS})\n🇫🇷 Roulette complet !\n🇬🇧 Roulette is full!",
+                ephemeral=True
+            )
+            return
+        game["players"].append({"id": uid, "name": name})
+        count = len(game["players"])
+        await interaction.response.send_message(
+            f"✅ **{name}** — 🇩🇪 beigetreten ({count}/{MAX_ROULETTE_PLAYERS}) / "
+            f"🇫🇷 rejoint ({count}/{MAX_ROULETTE_PLAYERS}) / "
+            f"🇧🇷 entrou ({count}/{MAX_ROULETTE_PLAYERS}) / "
+            f"🇬🇧 joined ({count}/{MAX_ROULETTE_PLAYERS})!",
+            ephemeral=True
+        )
             return
         game["players"].append({"id": uid, "name": name})
         count = len(game["players"])
@@ -1235,10 +1252,10 @@ async def cmd_roulette(ctx):
     embed.add_field(
         name="🔫 Wer wagt es?",
         value=(
-            f"🇩🇪 **{ctx.author.display_name}** startet Russisches Roulette!\n"
-            f"🇫🇷 **{ctx.author.display_name}** lance la roulette russe !\n"
-            f"🇧🇷 **{ctx.author.display_name}** inicia a roleta russa!\n"
-            f"🇬🇧 **{ctx.author.display_name}** starts Russian Roulette!\n\n"
+            f"🇩🇪 **{ctx.author.display_name}** startet Russisches Roulette! (bis {MAX_ROULETTE_PLAYERS} Spieler)\n"
+            f"🇫🇷 **{ctx.author.display_name}** lance la roulette russe ! (jusqu'à {MAX_ROULETTE_PLAYERS} joueurs)\n"
+            f"🇧🇷 **{ctx.author.display_name}** inicia a roleta russa! (até {MAX_ROULETTE_PLAYERS} jogadores)\n"
+            f"🇬🇧 **{ctx.author.display_name}** starts Russian Roulette! (up to {MAX_ROULETTE_PLAYERS} players)\n\n"
             f"🇩🇪 Klicke auf Beitreten! Auswertung in **{ROULETTE_TIMER}s**.\n"
             f"🇫🇷 Clique sur Rejoindre ! Résultat dans **{ROULETTE_TIMER}s**.\n"
             f"🇧🇷 Clique em Entrar! Resultado em **{ROULETTE_TIMER}s**.\n"
@@ -1251,7 +1268,7 @@ async def cmd_roulette(ctx):
         ),
         inline=False
     )
-    embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s zum Beitreten • VHA Russisches Roulette", icon_url=LOGO_URL)
+    embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s • 1/{MAX_ROULETTE_PLAYERS} Spieler • VHA Russisches Roulette", icon_url=LOGO_URL)
     msg = await ctx.send(embed=embed, view=view)
     view.message = msg
 
@@ -1270,12 +1287,18 @@ async def cmd_roulette(ctx):
         pass
 
     if len(players) < 2:
-        await ctx.send(
-            "🇩🇪 Zu wenige Spieler — Roulette abgebrochen.\n"
-            "🇫🇷 Pas assez de joueurs — roulette annulée.\n"
-            "🇬🇧 Not enough players — roulette cancelled.",
-            delete_after=10
+        embed_timeout = discord.Embed(
+            title="⏱️ Zeit um! / Time's up!",
+            description=(
+                "🇩🇪 Roulette beendet — zu wenige Spieler (mind. 2 benötigt).\n"
+                "🇫🇷 Roulette terminé — pas assez de joueurs (min. 2 requis).\n"
+                "🇧🇷 Roleta encerrada — jogadores insuficientes (mín. 2).\n"
+                "🇬🇧 Roulette ended — not enough players (min. 2 required)."
+            ),
+            color=0x95A5A6
         )
+        embed_timeout.set_footer(text="VHA Russisches Roulette", icon_url=LOGO_URL)
+        await ctx.send(embed=embed_timeout)
         return
 
     loser   = _random.choice(players)
