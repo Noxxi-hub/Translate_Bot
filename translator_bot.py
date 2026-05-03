@@ -686,7 +686,9 @@ async def on_message(message: discord.Message):
     processed_messages.append(message.id)
     processed_messages_set.add(message.id)
 
-    if message.content.startswith(bot.command_prefix):
+    # Befehle (!...) niemals übersetzen — sofort und direkt skippen
+    msg_stripped = message.content.strip()
+    if msg_stripped and msg_stripped[0] == "!":
         await bot.process_commands(message)
         return
 
