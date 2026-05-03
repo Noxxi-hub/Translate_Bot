@@ -316,6 +316,7 @@ async def translate_all(text: str, target_langs: list) -> dict:
                         f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
                         f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
                         f"4. Kosenamen korrekt übersetzen: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
+                        f"4b. Diese Kosenamen NIEMALS übersetzen, immer so lassen: baby, babe, bby, amor, mon amour, chéri, chérie — die werden in allen Sprachen verstanden\n"
                         f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
                         f"6. Emojis bleiben exakt unverändert\n"
                         f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
