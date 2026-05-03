@@ -480,6 +480,164 @@ async def cmd_ping(ctx):
     await ctx.send(embed=embed)
 
 
+# ────────────────────────────────────────────────
+# WÜRFELSPIEL 🎲
+# ────────────────────────────────────────────────
+
+import random as _random
+
+DICE_FACES = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
+
+# Aktive Würfelduell-Herausforderungen: {channel_id: {challenger_id, challenger_name, roll}}
+_dice_challenges: dict = {}
+
+
+@bot.command(name="würfel", aliases=["dice", "roll", "dé", "dado", "кубик", "w6"])
+async def cmd_wuerfel(ctx, seiten: int = 6):
+    """
+    Würfelspiel — mehrere Modi:
+    !würfel          → wirf einen W6
+    !würfel 20       → wirf einen W20 (oder beliebige Seitenzahl)
+    !würfel duell    → fordere den nächsten Spieler zum Duell heraus
+    """
+    # Sonderfall: "duell" als Argument
+    if ctx.invoked_with in ("würfel", "dice", "roll", "dé", "dado", "кубик", "w6"):
+        # Prüfe ob erstes Argument "duell" ist — aber seiten wäre dann kein int
+        pass
+
+    if not (2 <= seiten <= 1000):
+        await ctx.send("❌ Seitenzahl muss zwischen 2 und 1000 liegen.", delete_after=6)
+        return
+
+    result = _random.randint(1, seiten)
+    face = DICE_FACES.get(result, "🎲")
+
+    # Bewertung
+    pct = result / seiten
+    if pct == 1.0:
+        comment = "🏆 **MAXIMUM!** Unglaublich!"
+        color = 0xF1C40F
+    elif pct >= 0.8:
+        comment = "🔥 Starker Wurf!"
+        color = 0x2ECC71
+    elif pct >= 0.5:
+        comment = "👍 Solider Wurf."
+        color = 0x3498DB
+    elif pct >= 0.2:
+        comment = "😬 Könnte besser sein..."
+        color = 0xF39C12
+    else:
+        comment = "💀 Kritischer Misserfolg!"
+        color = 0xE74C3C
+
+    embed = discord.Embed(
+        title=f"{face} W{seiten}-Wurf",
+        description=f"**{ctx.author.display_name}** würfelt einen W{seiten}...\n\n"
+                    f"# {result}\n\n{comment}",
+        color=color
+    )
+    embed.set_footer(text=f"1–{seiten} möglich", icon_url=LOGO_URL)
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="duell", aliases=["duel", "duel🎲"])
+async def cmd_duell(ctx):
+    """
+    Würfelduell gegen einen anderen Spieler.
+    Erster Spieler tippt !duell → fordert heraus
+    Zweiter Spieler tippt !duell → nimmt an und das Ergebnis wird ermittelt
+    """
+    channel_id = ctx.channel.id
+    user_id = ctx.author.id
+
+    # Läuft bereits eine Herausforderung in diesem Kanal?
+    if channel_id in _dice_challenges:
+        challenge = _dice_challenges[channel_id]
+
+        # Derselbe User kann nicht gegen sich selbst spielen
+        if challenge["challenger_id"] == user_id:
+            await ctx.send(
+                f"⏳ Du hast bereits ein Duell gestartet, {ctx.author.display_name}! "
+                "Warte auf einen anderen Spieler.",
+                delete_after=8
+            )
+            return
+
+        # Herausforderer wird angenommen!
+        del _dice_challenges[channel_id]
+
+        roll1 = challenge["roll"]
+        roll2 = _random.randint(1, 6)
+        face1 = DICE_FACES[roll1]
+        face2 = DICE_FACES[roll2]
+
+        challenger_name = challenge["challenger_name"]
+        opponent_name = ctx.author.display_name
+
+        if roll1 > roll2:
+            winner = f"🏆 **{challenger_name}** gewinnt!"
+            color = 0xF1C40F
+        elif roll2 > roll1:
+            winner = f"🏆 **{opponent_name}** gewinnt!"
+            color = 0xF1C40F
+        else:
+            winner = "🤝 **Unentschieden!** Nochmal würfeln?"
+            color = 0x9B59B6
+
+        embed = discord.Embed(
+            title="🎲 Würfelduell — Ergebnis!",
+            color=color
+        )
+        embed.add_field(
+            name=f"{face1} {challenger_name}",
+            value=f"# {roll1}",
+            inline=True
+        )
+        embed.add_field(name="VS", value="⚔️", inline=True)
+        embed.add_field(
+            name=f"{face2} {opponent_name}",
+            value=f"# {roll2}",
+            inline=True
+        )
+        embed.add_field(name="Ergebnis", value=winner, inline=False)
+        embed.set_footer(text="VHA Würfelduell", icon_url=LOGO_URL)
+        await ctx.send(embed=embed)
+
+    else:
+        # Neue Herausforderung starten
+        roll = _random.randint(1, 6)
+        _dice_challenges[channel_id] = {
+            "challenger_id": user_id,
+            "challenger_name": ctx.author.display_name,
+            "roll": roll,
+        }
+
+        embed = discord.Embed(
+            title="🎲 Würfelduell — Herausforderung!",
+            description=(
+                f"**{ctx.author.display_name}** fordert zum Würfelduell heraus!\n\n"
+                "Wer nimmt die Herausforderung an?\n"
+                "Tippe `!duell` um mitzuspielen!\n\n"
+                "*(Die Würfel werden erst am Ende aufgedeckt)*"
+            ),
+            color=0x9B59B6
+        )
+        embed.set_footer(text="Herausforderung läuft...", icon_url=LOGO_URL)
+        await ctx.send(embed=embed)
+
+        # Nach 5 Minuten automatisch ablaufen lassen
+        await asyncio.sleep(300)
+        if channel_id in _dice_challenges and _dice_challenges[channel_id]["challenger_id"] == user_id:
+            del _dice_challenges[channel_id]
+            try:
+                await ctx.send(
+                    f"⏰ Das Würfelduell von **{ctx.author.display_name}** ist abgelaufen — niemand hat angenommen.",
+                    delete_after=10
+                )
+            except Exception:
+                pass
+
+
 @bot.command(name="translate")
 @commands.has_permissions(manage_messages=True)
 async def cmd_translate(ctx, action: str = None):
