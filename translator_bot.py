@@ -549,13 +549,6 @@ DICE_FACES = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️�
 # Aktive Würfelduell-Herausforderungen: {channel_id: {challenger_id, challenger_name, roll}}
 _dice_challenges: dict = {}
 
-# ── NEUE MINISPIELE GLOBALS ──
-_raub_cooldowns: dict[int, float] = {}
-_jail: dict[int, float] = {}
-_hoet_games: dict[int, dict] = {}
-_bomb_games: dict[int, dict] = {}
-_roulette_games: dict[int, dict] = {}
-
 
 @bot.command(name="würfel", aliases=["dice", "roll", "dé", "dado", "кубик", "w6"])
 async def cmd_wuerfel(ctx, seiten: int = 6):
@@ -779,7 +772,6 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         losses = data.get("losses", 0)
         draws  = data.get("draws",  0)
         games  = data.get("games",  0)
-        points = data.get("points", 0)
         wr     = round(wins / games * 100) if games else 0
         embed = discord.Embed(
             title=f"🎲 {data.get('name', member.display_name)}",
@@ -788,7 +780,6 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         embed.add_field(
             name="🇩🇪 Statistik  /  🇫🇷 Statistiques  /  🇬🇧 Stats",
             value=(
-                f"💎 **{points}** Punkte / Points / Points\n"
                 f"🏆 **{wins}** Siege / Victoires / Wins\n"
                 f"💀 **{losses}** Niederlagen / Défaites / Losses\n"
                 f"🤝 **{draws}** Unentschieden / Égalités / Draws\n"
@@ -797,7 +788,7 @@ async def cmd_ranking(ctx, member: discord.Member = None):
             ),
             inline=False
         )
-        embed.set_footer(text="VHA Ranking", icon_url=LOGO_URL)
+        embed.set_footer(text="VHA Würfelranking", icon_url=LOGO_URL)
         await ctx.send(embed=embed)
         return
 
@@ -819,195 +810,15 @@ async def cmd_ranking(ctx, member: discord.Member = None):
         losses = p.get("losses", 0)
         draws  = p.get("draws",  0)
         games  = p.get("games",  0)
-        points = p.get("points", 0)
         wr     = round(wins / games * 100) if games else 0
-        lines.append(f"{medal} **{p['name']}** — 💎 {points}P | 🏆 {wins}W / 💀 {losses}L  *(📊 {wr}%)*")
+        lines.append(f"{medal} **{p['name']}** — 🏆 {wins}W / 💀 {losses}L / 🤝 {draws}D  *(📊 {wr}%)*")
     embed = discord.Embed(
-        title="🎲 Ranking / Classement / Leaderboard",
+        title="🎲 Würfel-Ranking / Classement / Leaderboard",
         description="\n".join(lines),
         color=0xF1C40F
     )
-    embed.set_footer(text="VHA Ranking  •  !ranking @User für Details", icon_url=LOGO_URL)
+    embed.set_footer(text="VHA Würfelranking  •  !ranking @User für Details", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
-
-
-# ────────────────────────────────────────────────
-# NEUE MINISPIELE
-# ────────────────────────────────────────────────
-
-def _is_jailed(user_id: int) -> tuple[bool, int]:
-    now = time.time()
-    if user_id in _jail and _jail[user_id] > now:
-        return True, int(_jail[user_id] - now)
-    return False, 0
-
-
-@bot.command(name="raub", aliases=["steal", "voler", "roubar"])
-async def cmd_raub(ctx, member: discord.Member = None):
-    attacker = ctx.author
-    jailed, secs = _is_jailed(attacker.id)
-    if jailed:
-        await ctx.send(f"🔒 🇩🇪 Noch {secs}s im Gefängnis! 🇫🇷 Prison {secs}s ! 🇬🇧 Jail {secs}s!", delete_after=6); return
-    if not member or member.bot or member.id == attacker.id:
-        await ctx.send("❌ 🇩🇪 Erwähne einen Spieler! 🇫🇷 Mentionne un joueur ! 🇬🇧 Mention a player!", delete_after=6); return
-    now = time.time()
-    if now - _raub_cooldowns.get(attacker.id, 0) < 300:
-        wait = int(300 - (now - _raub_cooldowns[attacker.id]))
-        await ctx.send(f"⏳ Cooldown: {wait}s", delete_after=6); return
-    _raub_cooldowns[attacker.id] = now
-    victim_data = db_get_player(member.id) or {"points": 0}
-    victim_points = victim_data.get("points", 0)
-    if victim_points < 5:
-        await ctx.send(f"💸 {member.display_name} hat zu wenig Punkte!", delete_after=8); return
-    steal_amount = max(5, min(50, int(victim_points * 0.1)))
-    success = _random.random() < 0.3
-    if success:
-        db_add_points(attacker.id, attacker.display_name, steal_amount)
-        db_add_points(member.id, member.display_name, -steal_amount)
-        embed = discord.Embed(title="💰 Raubzug / Braquage / Heist", color=0x2ECC71)
-        embed.description = f"🇩🇪 **{attacker.display_name}** stahl **{steal_amount}** Punkte von **{member.display_name}**!\n🇫🇷 Vol de **{steal_amount}** points !\n🇬🇧 Stole **{steal_amount}** points!"
-    else:
-        if _random.random() < 0.5:
-            penalty = max(5, steal_amount // 2)
-            db_add_points(attacker.id, attacker.display_name, -penalty)
-            db_add_points(member.id, member.display_name, penalty)
-            txt = f"🇩🇪 Gescheitert! -{penalty} Punkte\n🇫🇷 Raté ! -{penalty}\n🇬🇧 Failed! -{penalty}"
-        else:
-            _jail[attacker.id] = now + 300
-            txt = f"🇩🇪 Gescheitert! 5 Min Gefängnis!\n🇫🇷 Prison 5 min!\n🇬🇧 Jail 5 min!"
-        embed = discord.Embed(title="🚨 Raubzug gescheitert", color=0xE74C3C, description=txt)
-    embed.set_footer(text="30% Chance", icon_url=LOGO_URL)
-    await ctx.send(embed=embed)
-
-
-class HotView(discord.ui.View):
-    def __init__(self, author_id):
-        super().__init__(timeout=180)
-        self.author_id = author_id
-    async def interaction_check(self, interaction):
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message("❌ Nicht dein Spiel!", ephemeral=True); return False
-        return True
-    @discord.ui.button(label="⬆️ Höher", style=discord.ButtonStyle.success)
-    async def higher(self, interaction, button):
-        await self._guess(interaction, "higher")
-    @discord.ui.button(label="⬇️ Tiefer", style=discord.ButtonStyle.danger)
-    async def lower(self, interaction, button):
-        await self._guess(interaction, "lower")
-    @discord.ui.button(label="💰 Stop", style=discord.ButtonStyle.secondary)
-    async def stop_btn(self, interaction, button):
-        uid = self.author_id
-        if uid not in _hoet_games:
-            await interaction.response.send_message("Kein Spiel", ephemeral=True); return
-        game = _hoet_games.pop(uid)
-        pot = game["pot"]
-        db_add_points(uid, interaction.user.display_name, pot)
-        emb = discord.Embed(title="💰 Ausgezahlt!", color=0xF1C40F, description=f"🇩🇪 **{pot}** Punkte gesichert!\n🇫🇷 **{pot}** points!\n🇬🇧 **{pot}** points!")
-        await interaction.response.edit_message(embed=emb, view=None); self.stop()
-    async def _guess(self, interaction, guess):
-        uid = self.author_id
-        game = _hoet_games.get(uid)
-        if not game:
-            await interaction.response.send_message("Starte mit !hot", ephemeral=True); return
-        cur = game["current"]; new = _random.randint(1,10)
-        while new == cur: new = _random.randint(1,10)
-        correct = (guess=="higher" and new>cur) or (guess=="lower" and new<cur)
-        if correct:
-            game["streak"]+=1; game["pot"]*=2; game["current"]=new
-            emb = discord.Embed(title="✅ Richtig!", color=0x2ECC71)
-            emb.add_field(name=f"{cur} → {new}", value=f"🇩🇪 Pot: **{game['pot']}**\n🇫🇷 Pot: **{game['pot']}**\n🇬🇧 Pot: **{game['pot']}**")
-            await interaction.response.edit_message(embed=emb, view=self)
-        else:
-            _hoet_games.pop(uid, None)
-            emb = discord.Embed(title="❌ Falsch!", color=0xE74C3C, description=f"🇩🇪 Alles verloren! ({cur}→{new})\n🇫🇷 Tout perdu!\n🇬🇧 All lost!")
-            await interaction.response.edit_message(embed=emb, view=None); self.stop()
-
-@bot.command(name="hot", aliases=["höher", "hoeher", "higher"])
-async def cmd_hot(ctx):
-    uid = ctx.author.id
-    if _is_jailed(uid)[0]:
-        await ctx.send("🔒 Im Gefängnis!", delete_after=5); return
-    if uid in _hoet_games:
-        await ctx.send("Du spielst bereits!", delete_after=5); return
-    first = _random.randint(1,10)
-    _hoet_games[uid] = {"current": first, "pot": 3, "streak": 0}
-    emb = discord.Embed(title="⬆️⬇️ Höher oder Tiefer", color=0x3498DB)
-    emb.description = f"🇩🇪 Zahl: **{first}** — wähle Button!\n🇫🇷 Nombre: **{first}**\n🇬🇧 Number: **{first}**\n\nPot: 3 Punkte"
-    await ctx.send(embed=emb, view=HotView(uid))
-
-
-class BombView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=15); self.clicked=False
-        outs=["defuse","explode","nothing"]; _random.shuffle(outs)
-        self.map={"🔴":outs[0],"🔵":outs[1],"🟡":outs[2]}
-    @discord.ui.button(label="🔴", style=discord.ButtonStyle.danger)
-    async def r(self, i, b): await self.handle(i,"🔴")
-    @discord.ui.button(label="🔵", style=discord.ButtonStyle.primary)
-    async def b(self, i, b): await self.handle(i,"🔵")
-    @discord.ui.button(label="🟡", style=discord.ButtonStyle.secondary)
-    async def y(self, i, b): await self.handle(i,"🟡")
-    async def handle(self, interaction, col):
-        if self.clicked: await interaction.response.send_message("Schon entschieden!", ephemeral=True); return
-        self.clicked=True; out=self.map[col]; u=interaction.user
-        if _is_jailed(u.id)[0]: await interaction.response.send_message("🔒 Gefängnis", ephemeral=True); return
-        if out=="defuse":
-            db_add_points(u.id,u.display_name,15); txt="🇩🇪 Entschärft! +15\n🇫🇷 Désamorcée +15\n🇬🇧 Defused +15"; colr=0x2ECC71
-        elif out=="explode":
-            db_add_points(u.id,u.display_name,-10); txt="🇩🇪 BOOM! -10\n🇫🇷 BOOM -10\n🇬🇧 BOOM -10"; colr=0xE74C3C
-        else:
-            txt="🇩🇪 Puh! Nichts passiert\n🇫🇷 Rien\n🇬🇧 Nothing"; colr=0x95A5A6
-        emb=discord.Embed(title=f"💣 {col}", description=txt, color=colr)
-        await interaction.response.edit_message(embed=emb, view=None); self.stop()
-
-@bot.command(name="bombe", aliases=["bomb","bomba"])
-async def cmd_bombe(ctx):
-    if _is_jailed(ctx.author.id)[0]: await ctx.send("🔒 Gefängnis", delete_after=5); return
-    emb=discord.Embed(title="💣 Bomben-Entschärfer", color=0xE67E22)
-    emb.description="🇩🇪 Ein Draht entschärft, einer explodiert, einer nichts. Klicke!\n🇫🇷 Un fil désamorce, un explose, un rien.\n🇬🇧 One defuses, one explodes, one nothing."
-    await ctx.send(embed=emb, view=BombView())
-
-
-class RouletteView(discord.ui.View):
-    def __init__(self, channel_id):
-        super().__init__(timeout=30); self.cid=channel_id
-    @discord.ui.button(label="Beitreten", style=discord.ButtonStyle.green, emoji="🔫")
-    async def join(self, interaction, button):
-        game=_roulette_games.get(self.cid)
-        if not game: return
-        if any(p["id"]==interaction.user.id for p in game["players"]):
-            await interaction.response.send_message("Schon dabei!", ephemeral=True); return
-        if _is_jailed(interaction.user.id)[0]:
-            await interaction.response.send_message("🔒 Gefängnis", ephemeral=True); return
-        game["players"].append({"id":interaction.user.id,"name":interaction.user.display_name})
-        await interaction.response.send_message(f"✅ {interaction.user.display_name} dabei ({len(game['players'])}/6)", ephemeral=True)
-
-@bot.command(name="roulette", aliases=["rr"])
-async def cmd_roulette(ctx):
-    cid=ctx.channel.id
-    if _is_jailed(ctx.author.id)[0]: await ctx.send("🔒 Gefängnis", delete_after=5); return
-    if cid not in _roulette_games:
-        _roulette_games[cid]={"players":[{"id":ctx.author.id,"name":ctx.author.display_name}]}
-        emb=discord.Embed(title="🔫 Russisches Roulette", color=0x8E44AD)
-        emb.description=f"🇩🇪 {ctx.author.display_name} startet! Klicke Beitreten — 30s\n🇫🇷 Clique pour rejoindre\n🇬🇧 Click to join"
-        view=RouletteView(cid)
-        await ctx.send(embed=emb, view=view)
-        await asyncio.sleep(30)
-        game=_roulette_games.pop(cid,None)
-        if not game or len(game["players"])<2:
-            await ctx.send("❌ Zu wenig Spieler"); return
-        loser=_random.choice(game["players"])
-        for p in game["players"]:
-            db_add_points(p["id"],p["name"], -10 if p["id"]==loser["id"] else 5)
-        emb2=discord.Embed(title="💥 BANG!", color=0xC0392B, description=f"🇩🇪 **{loser['name']}** getroffen! -10\n🇫🇷 Touché -10\n🇬🇧 Hit -10\n\nAndere +5")
-        await ctx.send(embed=emb2)
-        try:
-            m=ctx.guild.get_member(loser["id"])
-            if m and ctx.guild.me.guild_permissions.moderate_members:
-                await m.timeout(discord.utils.utcnow()+discord.timedelta(seconds=60), reason="Roulette")
-        except: pass
-    else:
-        await ctx.send("Spiel läuft bereits – nutze den Button!", delete_after=5)
 
 
 @bot.command(name="translate")
