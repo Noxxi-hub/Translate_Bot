@@ -1697,7 +1697,15 @@ async def on_message(message: discord.Message):
     FORUM_CHANNEL_ID = 1478065008960077866
     channel_id = message.channel.id
     parent_id = getattr(message.channel, 'parent_id', None)
-    if channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID:
+
+    # HARDCODED Räume — kein MongoDB, immer diese Sprachen
+    HARDCODED_ROOMS = {
+        1498224449529577595: {"FR", "EN"},
+    }
+
+    if channel_id in HARDCODED_ROOMS:
+        room_setting = HARDCODED_ROOMS[channel_id]
+    elif channel_id == FORUM_CHANNEL_ID or parent_id == FORUM_CHANNEL_ID:
         room_setting = {"PT", "EN", "DE", "FR"}
     else:
         try:

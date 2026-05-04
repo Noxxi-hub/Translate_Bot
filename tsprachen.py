@@ -95,12 +95,20 @@ def set_active_langs(langs: set):
         log.error(f"Fehler beim Speichern der Sprachen: {e}")
 
 
+# HARDCODED Räume — kein MongoDB, immer diese Sprachen
+_HARDCODED_ROOMS = {
+    1498224449529577595: {"FR", "EN"},
+}
+
 def get_room_langs(channel_id: int) -> set | None:
     """
     Raumsprachen für einen Kanal.
     Gibt None zurück wenn keine eigenen Einstellungen → globale nutzen.
     Gibt leeres set zurück wenn Kanal deaktiviert.
     """
+    # Hardcoded Räume — überschreibt MongoDB immer
+    if channel_id in _HARDCODED_ROOMS:
+        return _HARDCODED_ROOMS[channel_id]
     try:
         col = get_room_col()
         doc = col.find_one({"_id": str(channel_id)})
