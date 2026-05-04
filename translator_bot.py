@@ -1067,12 +1067,14 @@ class BombenView(discord.ui.View):
         if self.msg:
             try:
                 await self.msg.edit(view=self)
-                await self.msg.channel.send(
-                    "⏰ 🇩🇪 **Zeit abgelaufen!** Die Bombe hat niemand entschärft — Explosion!\n"
-                    "⏰ 🇫🇷 **Temps écoulé !** Personne n'a désamorcé la bombe — Explosion !\n"
-                    "⏰ 🇧🇷 **Tempo esgotado!** Ninguém desarmou a bomba — Explosão!\n"
-                    "⏰ 🇬🇧 **Time's up!** Nobody defused the bomb — Explosion! 💥"
-                )
+                # Nur senden wenn noch niemand gedrückt hat
+                if not self.resolved:
+                    await self.msg.channel.send(
+                        "⏰ 🇩🇪 **Zeit abgelaufen!** Die Bombe hat niemand entschärft — Explosion!\n"
+                        "⏰ 🇫🇷 **Temps écoulé !** Personne n'a désamorcé la bombe — Explosion !\n"
+                        "⏰ 🇧🇷 **Tempo esgotado!** Ninguém desarmou a bomba — Explosão!\n"
+                        "⏰ 🇬🇧 **Time's up!** Nobody defused the bomb — Explosion! 💥"
+                    )
             except Exception:
                 pass
 
@@ -1357,12 +1359,14 @@ class RouletteJoinView(discord.ui.View):
             return
         game["players"].append({"id": uid, "name": name})
         count = len(game["players"])
+        # Ephemeral-Bestätigung nur für den Drückenden
         await interaction.response.send_message(
-            f"✅ **{name}** — 🇩🇪 beigetreten ({count} Spieler) / "
-            f"🇫🇷 rejoint ({count} joueurs) / "
-            f"🇧🇷 entrou ({count} jogadores) / "
-            f"🇬🇧 joined ({count} players)!",
+            f"✅ Du bist dabei, **{name}**!",
             ephemeral=True
+        )
+        # Öffentliche Nachricht für alle sichtbar
+        await interaction.channel.send(
+            f"🔫 **{name}** 🇩🇪 ist beigetreten / 🇫🇷 a rejoint / 🇧🇷 entrou / 🇬🇧 joined! **({count})**"
         )
 
     async def on_timeout(self):
