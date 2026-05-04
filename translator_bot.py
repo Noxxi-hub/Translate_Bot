@@ -822,12 +822,14 @@ class DuellJoinView(discord.ui.View):
         roll = _random.randint(1, 6)
         ch["players"].append({"id": uid, "name": name, "roll": roll})
         count = len(ch["players"])
+        # Ephemeral nur als kurze Bestätigung für den Drückenden
         await interaction.response.send_message(
-            f"✅ **{name}** — 🇩🇪 beigetreten ({count}/{MAX_DUEL_PLAYERS}) / "
-            f"🇫🇷 rejoint ({count}/{MAX_DUEL_PLAYERS}) / "
-            f"🇧🇷 entrou ({count}/{MAX_DUEL_PLAYERS}) / "
-            f"🇬🇧 joined ({count}/{MAX_DUEL_PLAYERS})!",
+            f"✅ Du bist dabei, **{name}**!",
             ephemeral=True
+        )
+        # Öffentliche Nachricht für alle sichtbar
+        await interaction.channel.send(
+            f"🎲 **{name}** 🇩🇪 ist beigetreten / 🇫🇷 a rejoint / 🇧🇷 entrou / 🇬🇧 joined! **({count}/{MAX_DUEL_PLAYERS})**"
         )
 
     async def on_timeout(self):
