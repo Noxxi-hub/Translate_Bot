@@ -221,7 +221,7 @@ async def gemini_call(model: str, messages: list, temperature: float = 0.1,
                         token_counter["completion"] += resp.usage_metadata.candidates_token_count or 0
                         token_counter["total"]      += total
                         log.info(f"Tokens: +{total} (heute gesamt: {token_counter['total']})")
-                    
+
                     if model_name != GEMINI_MODELS[0]:
                         log.info(f"FALLBACK OK → {model_name}")
                     return resp.text.strip()
@@ -359,7 +359,7 @@ async def translate_all(text: str, target_langs: list) -> dict:
 
     codes = [code for code, _, _ in target_langs]
     cache_key = f"{text[:200]}_{'_'.join(codes)}"
-    
+
     if cache_key in translation_cache:
         log.info(f"Cache-Hit für Übersetzung")
         return translation_cache[cache_key]
@@ -544,6 +544,99 @@ async def cmd_ping(ctx):
     embed.add_field(name="🌐 Aktive Sprachen", value=", ".join(sorted(get_active_languages())), inline=False)
     embed.add_field(name="💾 Cache", value=f"Lang: {len(lang_cache)} | Trans: {len(translation_cache)}", inline=True)
     embed.set_footer(text="VHA Übersetzer-Bot • Optimiert", icon_url=LOGO_URL)
+    await ctx.send(embed=embed)
+
+
+# ────────────────────────────────────────────────
+# SPIELE-ÜBERSICHT 🎮
+# ────────────────────────────────────────────────
+
+@bot.command(name="games", aliases=["spiele", "spieleliste", "hilfe", "help", "jeux", "jogos"])
+async def cmd_games(ctx):
+    """Zeigt alle verfügbaren Spiele mit Befehlen und Regeln."""
+    embed = discord.Embed(
+        title="🎮 VHA Spiele-Übersicht / Liste des jeux / Lista de jogos / Game List",
+        color=0x9B59B6
+    )
+
+    embed.add_field(
+        name="🎲 Würfeln  —  `!würfel`",
+        value=(
+            "🇩🇪 Wirf einen W6. Auch `!würfel 20` für andere Würfel.\n"
+            "🇫🇷 Lance un dé. `!würfel 20` pour d'autres dés.\n"
+            "🇧🇷 Role um dado. `!würfel 20` para outros dados.\n"
+            "🇬🇧 Roll a die. `!würfel 20` for other dice."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚔️ Würfelduell  —  `!duell`",
+        value=(
+            "🇩🇪 Startet ein Gruppenduell (bis 10 Spieler). Beitreten per Button. Höchster Würfelwurf gewinnt. **+10 Pkt** Sieg / **-5 Pkt** Niederlage.\n"
+            "🇫🇷 Lance un duel de groupe. Rejoindre via bouton. Le plus haut dé gagne. **+10 pts** victoire / **-5 pts** défaite.\n"
+            "🇧🇷 Inicia um duelo em grupo. Entrar via botão. Maior dado ganha. **+10 pts** vitória / **-5 pts** derrota.\n"
+            "🇬🇧 Starts a group duel. Join via button. Highest roll wins. **+10 pts** win / **-5 pts** loss."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="💣 Bomben-Entschärfer  —  `!bombe`",
+        value=(
+            "🇩🇪 Drei Drähte (🔴🔵🟡) — nur einer entschärft die Bombe! Wer zuerst drückt entscheidet. **+15 Pkt** richtig / **-10 Pkt** falsch.\n"
+            "🇫🇷 Trois fils — un seul désamorce la bombe ! **+15 pts** correct / **-10 pts** mauvais.\n"
+            "🇧🇷 Três fios — apenas um desarma a bomba! **+15 pts** certo / **-10 pts** errado.\n"
+            "🇬🇧 Three wires — only one defuses the bomb! First to press decides. **+15 pts** correct / **-10 pts** wrong."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📈 Höher oder Tiefer  —  `!hot`",
+        value=(
+            "🇩🇪 Rate ob die nächste Zahl höher oder tiefer ist. Streak-Bonus: +3/+6/+9... Pkt pro richtigem Tipp. Falsch = alle Punkte weg! Stop = Punkte sichern.\n"
+            "🇫🇷 Devinez si le prochain chiffre est plus haut ou bas. Bonus de série: +3/+6/+9... Mauvais = tout perdu ! Stop = sécuriser.\n"
+            "🇧🇷 Adivinhe se o próximo número é maior ou menor. Bônus: +3/+6/+9... Errado = tudo perdido! Stop = garantir.\n"
+            "🇬🇧 Guess if the next number is higher or lower. Streak bonus: +3/+6/+9... Wrong = all lost! Stop = cash out."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎰 Russisches Roulette  —  `!roulette`",
+        value=(
+            "🇩🇪 Mindestens 2 Spieler per Button beitreten. Nach 30s wird zufällig ein Verlierer gezogen. **-20 Pkt** Verlierer / **+8 Pkt** Überlebende.\n"
+            "🇫🇷 Min. 2 joueurs via bouton. Après 30s un perdant est tiré au sort. **-20 pts** perdant / **+8 pts** survivants.\n"
+            "🇧🇷 Mín. 2 jogadores via botão. Após 30s um perdedor é sorteado. **-20 pts** perdedor / **+8 pts** sobreviventes.\n"
+            "🇬🇧 Min. 2 players via button. After 30s a random loser is picked. **-20 pts** loser / **+8 pts** survivors."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🦹 Raubzug  —  `!raub @Spieler`",
+        value=(
+            "🇩🇪 30% Chance Punkte zu stehlen. Bei Misserfolg: Punkte verloren ODER 5 Min Gefängnis (kein Raubzug möglich).\n"
+            "🇫🇷 30% de chance de voler des points. En cas d'échec: points perdus OU 5 min de prison.\n"
+            "🇧🇷 30% de chance de roubar pontos. Em caso de falha: pontos perdidos OU 5 min de prisão.\n"
+            "🇬🇧 30% chance to steal points. On failure: points lost OR 5 min jail (no robbery possible)."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🏆 Ranking  —  `!ranking` / `!ranking @Spieler`",
+        value=(
+            "🇩🇪 Zeigt die Top 10 mit Punkten & Statistiken. `!ranking @Name` für Details eines Spielers.\n"
+            "🇫🇷 Affiche le Top 10 avec points & stats. `!ranking @Nom` pour les détails d'un joueur.\n"
+            "🇧🇷 Mostra o Top 10 com pontos & estatísticas. `!ranking @Nome` para detalhes.\n"
+            "🇬🇧 Shows Top 10 with points & stats. `!ranking @Name` for a player's details."
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="VHA Spiele-Bot  •  !games für diese Übersicht", icon_url=LOGO_URL)
     await ctx.send(embed=embed)
 
 
@@ -1657,7 +1750,7 @@ async def on_message(message: discord.Message):
     import time as _time
     perf_start = _time.perf_counter()
     discord_delay_ms = int((_time.time() - message.created_at.timestamp()) * 1000)
-    
+
     # Cache-Key vorhersagen (wie in translate_all)
     codes = [c for c, _, _ in target_langs]
     cache_key = f"{content[:200]}_{'_'.join(codes)}"
@@ -1675,7 +1768,7 @@ async def on_message(message: discord.Message):
             await message.reply(embed=make_embed(fields), mention_author=False)
 
         total_ms = int((_time.perf_counter() - perf_start) * 1000)
-        
+
         # Log mit allen Details
         log.info(
             f"PERF [{message.guild.name if message.guild else 'DM'}] "
