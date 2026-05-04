@@ -608,19 +608,28 @@ MAX_DUEL_PLAYERS = 10
 DUEL_TIMER = 60  # Sekunden bis automatische Auswertung
 
 
-async def _resolve_duel(channel, channel_id: int):
+async def _resolve_duel(channel, channel_id: int, view_ref=None):
     """Wertet das Duell aus und schickt das Ergebnis-Embed."""
     if channel_id not in _dice_challenges:
         return
     ch = _dice_challenges.pop(channel_id)
     players = ch["players"]
 
+    # Button deaktivieren
+    if view_ref is not None:
+        for item in view_ref.children:
+            item.disabled = True
+        try:
+            await view_ref.msg.edit(view=view_ref)
+        except Exception:
+            pass
+
     if len(players) < 2:
         await channel.send(
-            "🇩🇪 Duell beendet — zu wenige Spieler.  "
-            "🇫🇷 Duel terminé — pas assez de joueurs.  "
-            "🇬🇧 Duel ended — not enough players.",
-            delete_after=10
+            "⏰ 🇩🇪 **Zeit abgelaufen!** Zu wenige Spieler — Duell abgebrochen.\n"
+            "⏰ 🇫🇷 **Temps écoulé !** Pas assez de joueurs — duel annulé.\n"
+            "⏰ 🇧🇷 **Tempo esgotado!** Jogadores insuficientes — duelo cancelado.\n"
+            "⏰ 🇬🇧 **Time's up!** Not enough players — duel cancelled."
         )
         return
 
@@ -643,12 +652,14 @@ async def _resolve_duel(channel, channel_id: int):
     if is_draw:
         result_de = f"🤝 **Unentschieden!** {' & '.join(w['name'] for w in winners)}"
         result_fr = f"🤝 **Égalité !** {' & '.join(w['name'] for w in winners)}"
+        result_pt = f"🤝 **Empate!** {' & '.join(w['name'] for w in winners)}"
         result_en = f"🤝 **Draw!** {' & '.join(w['name'] for w in winners)}"
         color = 0x9B59B6
     else:
         w = winners[0]
         result_de = f"🏆 **{w['name']}** gewinnt!"
         result_fr = f"🏆 **{w['name']}** gagne !"
+        result_pt = f"🏆 **{w['name']}** venceu!"
         result_en = f"🏆 **{w['name']}** wins!"
         color = 0xF1C40F
 
@@ -665,63 +676,94 @@ async def _resolve_duel(channel, channel_id: int):
         log.error(f"DB stats error: {e}")
 
     embed = discord.Embed(
-        title="🎲 Würfelduell — Ergebnis! / Résultat ! / Result!",
+        title="🎲 Würfelduell — Ergebnis! / Résultat ! / Resultado! / Result!",
         description="\n".join(lines),
         color=color
     )
     embed.add_field(
-        name="Ergebnis / Résultat / Result",
-        value=f"🇩🇪 {result_de}\n🇫🇷 {result_fr}\n🇬🇧 {result_en}",
+        name="Ergebnis / Résultat / Resultado / Result",
+        value=f"🇩🇪 {result_de}\n🇫🇷 {result_fr}\n🇧🇷 {result_pt}\n🇬🇧 {result_en}",
         inline=False
     )
-    embed.set_footer(text="VHA Würfelduell / Duel de dés / Dice Duel", icon_url=LOGO_URL)
+    embed.set_footer(text="VHA Würfelduell / Duel de dés / Duelo de dados / Dice Duel", icon_url=LOGO_URL)
     await channel.send(embed=embed)
+
+
+class DuellJoinView(discord.ui.View):
+    def __init__(self, channel_id: int):
+        super().__init__(timeout=DUEL_TIMER)
+        self.channel_id = channel_id
+        self.msg = None  # wird nach dem Senden gesetzt
+
+    @discord.ui.button(
+        label="🎲 Beitreten / Rejoindre / Entrar / Join",
+        style=discord.ButtonStyle.primary,
+        custom_id="duell_join"
+    )
+    async def btn_join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ch = _dice_challenges.get(self.channel_id)
+        if not ch:
+            await interaction.response.send_message(
+                "🇩🇪 Duell nicht mehr aktiv.\n🇫🇷 Duel plus actif.\n🇬🇧 Duel no longer active.",
+                ephemeral=True
+            )
+            return
+        uid  = interaction.user.id
+        name = interaction.user.display_name
+        if any(p["id"] == uid for p in ch["players"]):
+            await interaction.response.send_message(
+                f"🇩🇪 Du bist bereits dabei, **{name}**!\n"
+                f"🇫🇷 Tu es déjà inscrit !\n"
+                f"🇧🇷 Você já entrou!\n"
+                f"🇬🇧 You already joined!",
+                ephemeral=True
+            )
+            return
+        if len(ch["players"]) >= MAX_DUEL_PLAYERS:
+            await interaction.response.send_message(
+                f"🇩🇪 Duell ist voll! (max. {MAX_DUEL_PLAYERS})\n"
+                f"🇫🇷 Duel complet !\n🇬🇧 Duel is full!",
+                ephemeral=True
+            )
+            return
+        roll = _random.randint(1, 6)
+        ch["players"].append({"id": uid, "name": name, "roll": roll})
+        count = len(ch["players"])
+        await interaction.response.send_message(
+            f"✅ **{name}** — 🇩🇪 beigetreten ({count}/{MAX_DUEL_PLAYERS}) / "
+            f"🇫🇷 rejoint ({count}/{MAX_DUEL_PLAYERS}) / "
+            f"🇧🇷 entrou ({count}/{MAX_DUEL_PLAYERS}) / "
+            f"🇬🇧 joined ({count}/{MAX_DUEL_PLAYERS})!",
+            ephemeral=True
+        )
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        if self.msg:
+            try:
+                await self.msg.edit(view=self)
+            except Exception:
+                pass
 
 
 @bot.command(name="duell", aliases=["duel", "duel🎲"])
 async def cmd_duell(ctx):
-    """
-    Gruppenduell bis 10 Spieler — automatische Auswertung nach 60 Sekunden.
-    !duell → Duell starten ODER beitreten
-    """
+    """Gruppenduell bis 10 Spieler — Beitreten per Button, Auswertung nach 60s."""
     channel_id = ctx.channel.id
     user_id    = ctx.author.id
     name       = ctx.author.display_name
 
-    # ── BEITRETEN ──
     if channel_id in _dice_challenges:
-        ch = _dice_challenges[channel_id]
-
-        if any(p["id"] == user_id for p in ch["players"]):
-            await ctx.send(
-                f"🇩🇪 Du bist bereits dabei, **{name}**!  "
-                f"🇫🇷 Tu es déjà inscrit !  "
-                f"🇬🇧 You already joined!",
-                delete_after=6
-            )
-            return
-
-        if len(ch["players"]) >= MAX_DUEL_PLAYERS:
-            await ctx.send(
-                f"🇩🇪 Duell ist voll! (max. {MAX_DUEL_PLAYERS})  "
-                f"🇫🇷 Duel complet !  "
-                f"🇬🇧 Duel is full!",
-                delete_after=6
-            )
-            return
-
-        roll = _random.randint(1, 6)
-        ch["players"].append({"id": user_id, "name": name, "roll": roll})
-        count = len(ch["players"])
         await ctx.send(
-            f"✅ **{name}** 🇩🇪 ist beigetreten! ({count}/{MAX_DUEL_PLAYERS})  "
-            f"🇫🇷 a rejoint ! ({count}/{MAX_DUEL_PLAYERS})  "
-            f"🇬🇧 joined! ({count}/{MAX_DUEL_PLAYERS})",
-            delete_after=15
+            "🇩🇪 Ein Duell läuft bereits! Klicke den **Beitreten**-Button.\n"
+            "🇫🇷 Un duel est déjà en cours ! Clique sur le bouton.\n"
+            "🇧🇷 Um duelo já está em andamento! Clique no botão.\n"
+            "🇬🇧 A duel is already running! Click the Join button.",
+            delete_after=8
         )
         return
 
-    # ── NEUES DUELL STARTEN ──
     roll = _random.randint(1, 6)
     _dice_challenges[channel_id] = {
         "host_id":   user_id,
@@ -729,31 +771,35 @@ async def cmd_duell(ctx):
         "players":   [{"id": user_id, "name": name, "roll": roll}],
     }
 
-    embed = discord.Embed(title="🎲 Würfelduell / Duel de dés / Dice Duel", color=0x9B59B6)
+    view = DuellJoinView(channel_id)
+    embed = discord.Embed(title="🎲 Würfelduell / Duel de dés / Duelo / Dice Duel", color=0x9B59B6)
     embed.add_field(
         name=f"👑 {name}",
         value=(
             f"🇩🇪 **{name}** startet ein Gruppenduell! (bis {MAX_DUEL_PLAYERS} Spieler)\n"
             f"🇫🇷 **{name}** lance un duel de groupe ! (jusqu'à {MAX_DUEL_PLAYERS} joueurs)\n"
+            f"🇧🇷 **{name}** inicia um duelo em grupo! (até {MAX_DUEL_PLAYERS} jogadores)\n"
             f"🇬🇧 **{name}** starts a group duel! (up to {MAX_DUEL_PLAYERS} players)\n\n"
-            f"🇩🇪 Tippe `!duell` zum Beitreten — Auswertung in **{DUEL_TIMER} Sekunden**!\n"
-            f"🇫🇷 Tape `!duell` pour rejoindre — résultat dans **{DUEL_TIMER} secondes** !\n"
-            f"🇬🇧 Type `!duell` to join — result in **{DUEL_TIMER} seconds**!\n\n"
+            f"🇩🇪 Klicke den Button zum Beitreten — Auswertung in **{DUEL_TIMER}s**!\n"
+            f"🇫🇷 Clique sur le bouton pour rejoindre — résultat dans **{DUEL_TIMER}s** !\n"
+            f"🇧🇷 Clique no botão para entrar — resultado em **{DUEL_TIMER}s**!\n"
+            f"🇬🇧 Click the button to join — result in **{DUEL_TIMER}s**!\n\n"
             "🇩🇪 *(Würfel werden erst am Ende aufgedeckt)*\n"
             "🇫🇷 *(Dés révélés à la fin)*\n"
+            "🇧🇷 *(Dados revelados no final)*\n"
             "🇬🇧 *(Dice revealed at the end)*"
         ),
         inline=False
     )
     embed.set_footer(
-        text=f"⏱️ {DUEL_TIMER}s • 1/{MAX_DUEL_PLAYERS} Spieler • Herausforderung läuft... / Défi en cours... / Challenge running...",
+        text=f"⏱️ {DUEL_TIMER}s • 1/{MAX_DUEL_PLAYERS} • läuft... / en cours... / em andamento... / running...",
         icon_url=LOGO_URL
     )
-    await ctx.send(embed=embed)
+    msg = await ctx.send(embed=embed, view=view)
+    view.msg = msg
 
-    # 60 Sekunden warten, dann automatisch auswerten
     await asyncio.sleep(DUEL_TIMER)
-    await _resolve_duel(ctx.channel, channel_id)
+    await _resolve_duel(ctx.channel, channel_id, view_ref=view)
 
 
 # ────────────────────────────────────────────────
@@ -852,6 +898,7 @@ class BombenView(discord.ui.View):
         super().__init__(timeout=30)
         self.safe     = safe
         self.resolved = False
+        self.msg      = None  # wird nach dem Senden gesetzt
 
     async def _handle(self, interaction: discord.Interaction, color: str):
         if self.resolved:
@@ -922,6 +969,17 @@ class BombenView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        if self.msg:
+            try:
+                await self.msg.edit(view=self)
+                await self.msg.channel.send(
+                    "⏰ 🇩🇪 **Zeit abgelaufen!** Die Bombe hat niemand entschärft — Explosion!\n"
+                    "⏰ 🇫🇷 **Temps écoulé !** Personne n'a désamorcé la bombe — Explosion !\n"
+                    "⏰ 🇧🇷 **Tempo esgotado!** Ninguém desarmou a bomba — Explosão!\n"
+                    "⏰ 🇬🇧 **Time's up!** Nobody defused the bomb — Explosion! 💥"
+                )
+            except Exception:
+                pass
 
 
 @bot.command(name="bombe", aliases=["bomb", "bombe💣"])
@@ -946,7 +1004,8 @@ async def cmd_bombe(ctx):
         inline=False
     )
     embed.set_footer(text="⏱️ 30s • Jeder kann drücken! • VHA Bomben-Entschärfer", icon_url=LOGO_URL)
-    await ctx.send(embed=embed, view=view)
+    msg = await ctx.send(embed=embed, view=view)
+    view.msg = msg
 
 
 # ────────────────────────────────────────────────
@@ -960,6 +1019,8 @@ class HotView(discord.ui.View):
         self.current   = current
         self.streak    = streak
         self.points    = points
+        self.msg       = None  # wird nach dem Senden gesetzt
+        self.finished  = False
 
     async def _check_user(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -978,6 +1039,7 @@ class HotView(discord.ui.View):
         correct = (higher and next_roll > self.current) or (not higher and next_roll < self.current)
         name = interaction.user.display_name
         uid  = interaction.user.id
+        self.finished = True
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
@@ -1006,6 +1068,7 @@ class HotView(discord.ui.View):
             gained = 3 * self.streak
             self.points += gained
             new_view = HotView(author_id=uid, current=next_roll, streak=self.streak, points=self.points)
+            new_view.finished = False
             embed = discord.Embed(title="✅ Richtig! / Correct ! / Correct!", color=0x2ECC71)
             embed.add_field(
                 name=f"🔥 Streak x{self.streak} — {name}",
@@ -1059,6 +1122,7 @@ class HotView(discord.ui.View):
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self._check_user(interaction):
             return
+        self.finished = True
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
@@ -1081,8 +1145,52 @@ class HotView(discord.ui.View):
         await interaction.followup.send(embed=embed)
 
     async def on_timeout(self):
+        if self.finished:
+            return
+        self.finished = True
         for item in self.children:
             item.disabled = True
+        if self.msg:
+            try:
+                await self.msg.edit(view=self)
+            except Exception:
+                pass
+        # Punkte automatisch sichern falls vorhanden
+        if self.points > 0:
+            try:
+                # Wir können author_id nutzen um Punkte zu sichern
+                col = _get_dice_col()
+                col.update_one(
+                    {"user_id": self.author_id},
+                    {"$setOnInsert": {"user_id": self.author_id, "wins": 0, "losses": 0, "draws": 0, "games": 0, "points": 0}},
+                    upsert=True,
+                )
+                col.update_one(
+                    {"user_id": self.author_id},
+                    {"$inc": {"points": self.points}},
+                )
+            except Exception:
+                pass
+            if self.msg:
+                try:
+                    await self.msg.channel.send(
+                        f"⏰ 🇩🇪 **Zeit abgelaufen!** Gesammelte **{self.points} Punkte** wurden automatisch gesichert.\n"
+                        f"⏰ 🇫🇷 **Temps écoulé !** **{self.points} points** collectés ont été sauvegardés automatiquement.\n"
+                        f"⏰ 🇧🇷 **Tempo esgotado!** **{self.points} pontos** coletados foram salvos automaticamente.\n"
+                        f"⏰ 🇬🇧 **Time's up!** Collected **{self.points} points** were automatically secured."
+                    )
+                except Exception:
+                    pass
+        else:
+            if self.msg:
+                try:
+                    await self.msg.channel.send(
+                        "⏰ 🇩🇪 **Zeit abgelaufen!** Keine Punkte zu sichern.\n"
+                        "⏰ 🇫🇷 **Temps écoulé !** Aucun point à sauvegarder.\n"
+                        "⏰ 🇬🇧 **Time's up!** No points to secure."
+                    )
+                except Exception:
+                    pass
 
 
 @bot.command(name="hot", aliases=["höher", "highlow", "hochtief"])
@@ -1115,15 +1223,15 @@ async def cmd_hot(ctx):
         text=f"⏱️ 30s • Nur {ctx.author.display_name} kann klicken • VHA Höher oder Tiefer",
         icon_url=LOGO_URL
     )
-    await ctx.send(embed=embed, view=view)
+    msg = await ctx.send(embed=embed, view=view)
+    view.msg = msg
 
 
 # ────────────────────────────────────────────────
 # RUSSISCHES ROULETTE 🎰
 # ────────────────────────────────────────────────
 
-ROULETTE_TIMER   = 30
-ROULETTE_TIMEOUT = 60
+ROULETTE_TIMER = 30
 
 _roulette_games: dict = {}
 
@@ -1132,9 +1240,10 @@ class RouletteJoinView(discord.ui.View):
     def __init__(self, channel_id: int):
         super().__init__(timeout=ROULETTE_TIMER)
         self.channel_id = channel_id
+        self.msg        = None
 
     @discord.ui.button(
-        label="🔫 Beitreten / Rejoindre / Join / Entrar",
+        label="🔫 Beitreten / Rejoindre / Entrar / Join",
         style=discord.ButtonStyle.danger,
         custom_id="roulette_join"
     )
@@ -1164,11 +1273,16 @@ class RouletteJoinView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
+        if self.msg:
+            try:
+                await self.msg.edit(view=self)
+            except Exception:
+                pass
 
 
 @bot.command(name="roulette", aliases=["russisch", "russischeroulette"])
 async def cmd_roulette(ctx):
-    """Russisches Roulette — einer verliert und bekommt Timeout."""
+    """Russisches Roulette — min. 2 Spieler, einer verliert Punkte."""
     channel_id = ctx.channel.id
     if channel_id in _roulette_games:
         await ctx.send(
@@ -1195,20 +1309,18 @@ async def cmd_roulette(ctx):
             f"🇫🇷 **{ctx.author.display_name}** lance la roulette russe !\n"
             f"🇧🇷 **{ctx.author.display_name}** inicia a roleta russa!\n"
             f"🇬🇧 **{ctx.author.display_name}** starts Russian Roulette!\n\n"
-            f"🇩🇪 Klicke auf Beitreten! Auswertung in **{ROULETTE_TIMER}s**.\n"
-            f"🇫🇷 Clique sur Rejoindre ! Résultat dans **{ROULETTE_TIMER}s**.\n"
-            f"🇧🇷 Clique em Entrar! Resultado em **{ROULETTE_TIMER}s**.\n"
-            f"🇬🇧 Click Join! Result in **{ROULETTE_TIMER}s**.\n\n"
-            f"⚠️ 🇩🇪 **Verlierer bekommt {ROULETTE_TIMEOUT}s Timeout** (falls Bot Berechtigung hat) **-20 Punkte**\n"
-            f"⚠️ 🇫🇷 **Le perdant reçoit {ROULETTE_TIMEOUT}s de timeout** (si le bot a la permission) **-20 points**\n"
-            f"⚠️ 🇧🇷 **O perdedor recebe timeout de {ROULETTE_TIMEOUT}s** (se o bot tiver permissão) **-20 pontos**\n"
-            f"⚠️ 🇬🇧 **Loser gets {ROULETTE_TIMEOUT}s timeout** (if bot has permission) **-20 points**\n\n"
+            f"🇩🇪 Klicke Beitreten! Auswertung in **{ROULETTE_TIMER}s** (min. 2 Spieler nötig!)\n"
+            f"🇫🇷 Clique Rejoindre ! Résultat dans **{ROULETTE_TIMER}s** (min. 2 joueurs requis !)\n"
+            f"🇧🇷 Clique Entrar! Resultado em **{ROULETTE_TIMER}s** (mín. 2 jogadores!)\n"
+            f"🇬🇧 Click Join! Result in **{ROULETTE_TIMER}s** (min. 2 players needed!)\n\n"
+            f"💀 🇩🇪 Verlierer: **-20 Punkte** | 🇫🇷 Perdant: **-20 points** | 🇬🇧 Loser: **-20 points**\n"
             f"🏆 🇩🇪 Überlebende: **+8 Punkte** | 🇫🇷 Survivants: **+8 points** | 🇬🇧 Survivors: **+8 points**"
         ),
         inline=False
     )
-    embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s zum Beitreten • VHA Russisches Roulette", icon_url=LOGO_URL)
+    embed.set_footer(text=f"⏱️ {ROULETTE_TIMER}s • min. 2 Spieler • VHA Russisches Roulette", icon_url=LOGO_URL)
     msg = await ctx.send(embed=embed, view=view)
+    view.msg = msg
 
     await asyncio.sleep(ROULETTE_TIMER)
 
@@ -1226,10 +1338,10 @@ async def cmd_roulette(ctx):
 
     if len(players) < 2:
         await ctx.send(
-            "🇩🇪 Zu wenige Spieler — Roulette abgebrochen.\n"
-            "🇫🇷 Pas assez de joueurs — roulette annulée.\n"
-            "🇬🇧 Not enough players — roulette cancelled.",
-            delete_after=10
+            "⏰ 🇩🇪 **Zeit abgelaufen!** Niemand ist beigetreten — Roulette abgebrochen. Mindestens 2 Spieler nötig!\n"
+            "⏰ 🇫🇷 **Temps écoulé !** Personne n'a rejoint — roulette annulée. Minimum 2 joueurs requis !\n"
+            "⏰ 🇧🇷 **Tempo esgotado!** Ninguém entrou — roleta cancelada. Mínimo 2 jogadores!\n"
+            "⏰ 🇬🇧 **Time's up!** Nobody joined — roulette cancelled. Minimum 2 players needed!"
         )
         return
 
@@ -1245,47 +1357,24 @@ async def cmd_roulette(ctx):
     except Exception as e:
         log.error(f"Roulette DB error: {e}")
 
-    timeout_done = False
-    try:
-        member = ctx.guild.get_member(loser["id"])
-        if member:
-            import datetime
-            await member.timeout(
-                datetime.timedelta(seconds=ROULETTE_TIMEOUT),
-                reason="Russisches Roulette verloren"
-            )
-            timeout_done = True
-    except Exception as e:
-        log.warning(f"Timeout fehlgeschlagen: {e}")
-
     winner_names = " • ".join(w["name"] for w in winners)
-    timeout_info = (
-        f"\n🔇 🇩🇪 **{loser['name']}** ist für **{ROULETTE_TIMEOUT}s stummgeschaltet!**\n"
-        f"🔇 🇫🇷 **{loser['name']}** est muet pour **{ROULETTE_TIMEOUT}s** !\n"
-        f"🔇 🇬🇧 **{loser['name']}** is muted for **{ROULETTE_TIMEOUT}s**!"
-    ) if timeout_done else (
-        f"\n⚠️ 🇩🇪 Timeout nicht möglich (Bot braucht 'Timeout-Mitglieder'-Berechtigung).\n"
-        f"⚠️ 🇫🇷 Timeout impossible (le bot a besoin de la permission 'Timeout membres').\n"
-        f"⚠️ 🇬🇧 Timeout not possible (bot needs 'Timeout members' permission)."
-    )
 
     embed_result = discord.Embed(
-        title="🎰 ROULETTE — ERGEBNIS / RÉSULTAT / RESULT",
+        title="🎰 ROULETTE — ERGEBNIS / RÉSULTAT / RESULTADO / RESULT",
         color=0xE74C3C
     )
     embed_result.add_field(
-        name=f"💀 Verlierer / Perdant / Loser: {loser['name']}",
+        name=f"💀 Verlierer / Perdant / Perdedor / Loser: {loser['name']}",
         value=(
             f"🇩🇪 **{loser['name']}** hat das Pech gehabt! **-20 Punkte**\n"
             f"🇫🇷 **{loser['name']}** a eu la malchance ! **-20 points**\n"
             f"🇧🇷 **{loser['name']}** teve azar! **-20 pontos**\n"
             f"🇬🇧 **{loser['name']}** had the bad luck! **-20 points**"
-            + timeout_info
         ),
         inline=False
     )
     embed_result.add_field(
-        name=f"🏆 Überlebende / Survivants / Survivors: {winner_names}",
+        name=f"🏆 Überlebende / Survivants / Sobreviventes / Survivors: {winner_names}",
         value=(
             f"🇩🇪 Alle anderen: **+8 Punkte** pro Spieler\n"
             f"🇫🇷 Tous les autres: **+8 points** par joueur\n"
@@ -1303,6 +1392,7 @@ async def cmd_roulette(ctx):
 # ────────────────────────────────────────────────
 
 _jail: dict = {}
+JAIL_MINUTES = 5
 JAIL_MINUTES = 5
 
 @bot.command(name="raub", aliases=["steal", "vol", "roubo"])
