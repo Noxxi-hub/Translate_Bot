@@ -415,7 +415,7 @@ class TSprachenCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="tsprachen", aliases=["tlanguages", "tidiomas", "tlang"])
+    @commands.command(name="sprachen", aliases=["languages", "idiomas", "lang"])
     async def cmd_sprachen(self, ctx):
         """Globale Sprachen des Übersetzer-Bots per Button verwalten."""
         if not has_permission(ctx.author):
@@ -432,7 +432,7 @@ class TSprachenCog(commands.Cog):
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(name="traumsprachen", aliases=["troomlang"])
+    @commands.command(name="raumsprachen", aliases=["roomlang"])
     async def cmd_raumsprachen(self, ctx, channel_id: int = None):
         """Raumsprachen des Übersetzer-Bots per Button verwalten."""
         if not has_permission(ctx.author):
@@ -467,7 +467,7 @@ class TSprachenCog(commands.Cog):
         embed = view._make_embed()
         await ctx.send(embed=embed, view=view)
 
-    @commands.command(name="tkanalid", aliases=["tchannelid"])
+    @commands.command(name="kanalid", aliases=["channelid"])
     async def cmd_kanalid(self, ctx):
         """Alle Textkanäle mit ID als DM."""
         if not has_permission(ctx.author):
