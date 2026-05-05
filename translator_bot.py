@@ -353,7 +353,7 @@ async def detect_language_llm(text: str) -> str:
 # ÜBERSETZEN - MIT CACHE
 # ────────────────────────────────────────────────
 
-async def translate_all(text: str, target_langs: list) -> dict:
+async def translate_all(text: str, target_langs: list, context: str = "") -> dict:
     if not target_langs:
         return {}
 
@@ -377,18 +377,21 @@ async def translate_all(text: str, target_langs: list) -> dict:
                 {
                     "role": "system",
                     "content": (
-                        f"Du bist ein natürlicher, lockerer Übersetzer für einen Discord-Chat einer Gaming-Community.\n"
-                        f"WICHTIGSTE REGELN:\n"
-                        f"1. Verwende IMMER die Du-Form — niemals 'Sie' (Deutsch) oder 'Vous' (Französisch), immer 'Tu'.\n"
-                        f"2. Übersetze den SINN, nicht nur Wörter — es soll natürlich und wie ein echter Mensch klingen.\n"
-                        f"3. Behalte den Ton bei: Wenn ein Satz witzig, frech oder emotional ist, übersetze ihn genauso.\n"
-                        f"4. Kosenamen korrekt übersetzen: 'süße/süßer'→ma chérie/mon chéri (FR), sweetie/honey (EN); 'schatz'→chéri/chérie (FR), honey/darling (EN)\n"
-                        f"4b. Nur diese Kosenamen NIEMALS übersetzen: baby, babe, bby — diese bleiben in allen Sprachen unverändert\n"
-                        f"5. Diese Wörter NIE übersetzen: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen\n"
-                        f"6. Emojis bleiben exakt unverändert\n"
-                        f"7. Jedes Sprachfeld MUSS in der richtigen Sprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch\n"
-                        f"8. WICHTIG: Alle Sprachfelder MÜSSEN immer befüllt sein — auch bei sehr kurzen Sätzen\n"
-                        f"9. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
+                        f"Du bist ein intelligenter Übersetzer für eine internationale Gaming-Community (Discord).\n"
+                        f"Übersetze den Text in diese {len(codes)} Sprachen: {codes_str}.\n\n"
+                        + (f"GESPRÄCHSKONTEXT (letzte Nachrichten im Kanal — NUR zum Verstehen, NICHT übersetzen):\n{context}\n\n" if context else "")
+                        + f"DEINE MISSION:\n"
+                        f"1. ANALYSE: Erkenne den Tonfall — ist es ein privates/liebevolles Gespräch oder geht es um Spiel/Allianz-Organisation? Übersetze entsprechend.\n"
+                        f"2. NATÜRLICHKEIT: Übersetze den SINN. Klinge wie ein Muttersprachler im Chat, nicht wie ein Lexikon.\n"
+                        f"3. TON: Wenn ein Satz witzig, frech, emotional oder liebevoll ist, übersetze ihn genauso — nicht steif.\n"
+                        f"4. DU-FORM: Verwende IMMER 'Du' (Deutsch), 'Tu/Toi' (Französisch) — niemals 'Sie' oder 'Vous'.\n"
+                        f"5. KOSENAMEN: 'schatz'→chéri/chérie (FR), honey/darling (EN); 'süße/süßer'→ma chérie/mon chéri (FR), sweetie (EN).\n"
+                        f"5b. Diese Kosenamen NIE übersetzen: baby, babe, bby — bleiben in allen Sprachen gleich.\n"
+                        f"6. NO-GO: Spielernamen, @mentions, R1/R2/R3/R4/R5, Koordinaten, Allianz-Namen NIEMALS übersetzen.\n"
+                        f"7. Emojis bleiben exakt unverändert.\n"
+                        f"8. Jedes Sprachfeld MUSS in der richtigen Zielsprache sein — DE=Deutsch, FR=Französisch, EN=Englisch, PT=Portugiesisch.\n"
+                        f"9. WICHTIG: Alle {len(codes)} Sprachfelder MÜSSEN befüllt sein — auch bei sehr kurzen Sätzen.\n"
+                        f"10. Antworte NUR mit diesem JSON, kein Markdown, kein Extra-Text:\n"
                         f"{{{json_keys}}}"
                     )
                 },
@@ -1770,8 +1773,25 @@ async def on_message(message: discord.Message):
     cache_key = f"{content[:200]}_{'_'.join(codes)}"
     cache_hit = cache_key in translation_cache
 
+    # Kontext: letzte 4 Nachrichten aus dem Kanal laden
+    context_lines = []
     try:
-        translations = await translate_all(content, target_langs)
+        async for ctx_msg in message.channel.history(limit=5):
+            if ctx_msg.id == message.id:
+                continue
+            if ctx_msg.author.bot:
+                continue
+            if ctx_msg.content and len(ctx_msg.content.strip()) > 1:
+                context_lines.append(f"{ctx_msg.author.display_name}: {ctx_msg.content.strip()[:150]}")
+            if len(context_lines) >= 4:
+                break
+        context_lines.reverse()
+    except Exception:
+        pass
+    context_str = "\n".join(context_lines)
+
+    try:
+        translations = await translate_all(content, target_langs, context=context_str)
         fields = []
         for code, _, label in target_langs:
             translation = translations.get(code, "")
